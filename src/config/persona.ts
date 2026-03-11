@@ -1,0 +1,72 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { StyleProfile, UserTone } from "../types";
+
+const SOUL_PROMPT_PATH = path.resolve(process.cwd(), "agents", "SOUL.md");
+
+export const BANNED_MECHANICAL_PHRASES = [
+  "已读取历史偏好",
+  "系统检测到",
+  "当前请求需要人工处理",
+  "system detected",
+  "request requires manual processing"
+];
+
+const readSoulPromptMarkdown = async (): Promise<string | null> => {
+  try {
+    const raw = await readFile(SOUL_PROMPT_PATH, "utf8");
+    const content = raw.trim();
+    return content.length > 0 ? content : null;
+  } catch {
+    return null;
+  }
+};
+
+const buildPrompt = async (taskInstruction: string): Promise<string> => {
+  const soulMarkdown = await readSoulPromptMarkdown();
+  if (!soulMarkdown) {
+    throw new Error("缺少客服人设配置：请在项目根目录创建并填写 agents/SOUL.md");
+  }
+  return [soulMarkdown, "", "任务规则：", taskInstruction].join("\n");
+};
+
+export const buildRouterSystemPrompt = async (): Promise<string> =>
+  buildPrompt(
+    "你是客服路由器。只输出一个意图: visual_search/product_inquiry/order_status/general_chat/unknown。若 has_image=true 必须输出 visual_search。禁止输出其他内容。"
+  );
+
+export const buildComposerSystemPrompt = async (params: {
+  language: string;
+  styleProfile: StyleProfile;
+  userTone: UserTone;
+  openingHint: string;
+  closingHint: string;
+}): Promise<string> => {
+  const languageHint = params.language === "en-US" ? "Respond in natural English." : "使用自然中文回复。";
+  const instruction = [
+    "你是面向真实用户的一线客服，不要像系统公告。",
+    "回复必须按四段式自然融合：理解用户 -> 给出事实 -> 给出动作 -> 收束语气。",
+    "只允许引用输入中的 grounding facts，不得编造库存、订单、物流、价格。",
+    "信息不确定时，必须使用：说明不确定 + 要求补充 + 给替代路径。",
+    `语气偏好：${params.userTone}；风格：${JSON.stringify(params.styleProfile)}。`,
+    `开场建议：${params.openingHint}`,
+    `收束建议：${params.closingHint}`,
+    `禁止词：${BANNED_MECHANICAL_PHRASES.join(" / ")}。`,
+    languageHint,
+    "直接输出给用户的最终回复，不要输出解释。"
+  ].join("\n");
+
+  return buildPrompt(instruction);
+};
+
+export const buildReviewerSystemPrompt = async (language: string): Promise<string> => {
+  const instruction = [
+    "你是客服回复审校器。请基于输入内容严格评分并输出 JSON。",
+    "评分维度：事实一致性(0.5)、可执行性(0.2)、自然度(0.2)、重复模板惩罚(0.1)。",
+    "输出必须是 JSON 对象，字段固定：score(0-1), flags(string[]), reasons(string[]), must_handoff(boolean)。",
+    `若发现机械词（${BANNED_MECHANICAL_PHRASES.join("/")}）需加入 flags。`,
+    language === "en-US" ? "Reasons should be in English." : "Reasons 使用中文。"
+  ].join("\n");
+
+  return buildPrompt(instruction);
+};

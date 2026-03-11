@@ -1,0 +1,37 @@
+{
+  "name": "alice-ai-agent",
+  "version": "1.0.0",
+  "description": "多模态AI客服Agent系统 - 基于LangGraph.js",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "ts-node src/tests/run.ts",
+    "start:server": "node dist/server.js",
+    "dev:server": "ts-node src/server.ts"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "langgraph",
+    "multimodal",
+    "customer-service"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@langchain/core": "^0.3.0",
+    "@langchain/langgraph": "^0.2.0",
+    "@langchain/openai": "^0.3.0",
+    "axios": "^1.6.0",
+    "dotenv": "^17.3.1",
+    "uuid": "^11.1.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  }
+}
