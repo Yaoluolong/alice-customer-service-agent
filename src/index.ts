@@ -10,6 +10,8 @@ const main = async (): Promise<void> => {
   };
 
   const first = await customerServiceAgentService.chat({
+    tenantId: "tenant_demo",
+    customerId: "user_10001",
     userId: "user_10001",
     text: "[上传了一张红色风衣图片] 这个有红色的吗？我平时穿M码。",
     image
@@ -19,6 +21,8 @@ const main = async (): Promise<void> => {
   console.log(first);
 
   const second = await customerServiceAgentService.chat({
+    tenantId: "tenant_demo",
+    customerId: "user_10001",
     userId: "user_10001",
     sessionId: first.sessionId,
     text: "那订单 ORD-20260308-1001 现在到哪了？"

@@ -1,24 +1,159 @@
 import { BaseMessage } from "@langchain/core/messages";
+import {
+  mapChatMessagesToStoredMessages,
+  mapStoredMessagesToChatMessages,
+} from "@langchain/core/messages";
+import Redis from "ioredis";
+import { logger } from "./logger";
 import { AgentState } from "./types";
+
+export interface SessionStore {
+  get(sessionId: string): Promise<AgentState | null>;
+  set(sessionId: string, state: AgentState): Promise<void>;
+  merge(sessionId: string, patch: Partial<AgentState>): Promise<AgentState>;
+  close?(): Promise<void>;
+}
+
+// ── Serialization helpers ──────────────────────────────────────────────────
+
+interface SerializedState {
+  /** Everything except messages (plain JSON-safe) */
+  data: Omit<AgentState, "messages">;
+  /** Messages in langchain StoredMessage format */
+  messages: ReturnType<typeof mapChatMessagesToStoredMessages>;
+}
+
+const serialize = (state: AgentState): string => {
+  const { messages, ...data } = state;
+  const payload: SerializedState = {
+    data,
+    messages: mapChatMessagesToStoredMessages(messages),
+  };
+  return JSON.stringify(payload);
+};
+
+const deserialize = (raw: string): AgentState => {
+  const payload: SerializedState = JSON.parse(raw);
+  const messages = mapStoredMessagesToChatMessages(payload.messages);
+  return { ...payload.data, messages } as AgentState;
+};
+
+// ── Redis Session Store ────────────────────────────────────────────────────
+
+const KEY_PREFIX = "alice:session:";
+const DEFAULT_TTL_SECONDS = 24 * 60 * 60; // 24 hours
+
+/**
+ * Lua script for atomic merge: read → merge → write in a single round-trip.
+ * KEYS[1] = session key
+ * ARGV[1] = JSON patch (SerializedState of the patch)
+ * ARGV[2] = TTL in seconds
+ * Returns the merged state JSON, or nil if key doesn't exist.
+ */
+const MERGE_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+
+local ok, existing = pcall(cjson.decode, raw)
+if not ok then return nil end
+
+local ok2, patch = pcall(cjson.decode, ARGV[1])
+if not ok2 then return nil end
+
+-- Merge data fields (patch.data overrides existing.data)
+for k, v in pairs(patch.data) do
+  existing.data[k] = v
+end
+
+-- Append patch messages to existing messages
+if patch.messages and #patch.messages > 0 then
+  for _, m in ipairs(patch.messages) do
+    table.insert(existing.messages, m)
+  end
+end
+
+-- Update timestamp
+existing.data.updatedAt = tonumber(ARGV[3]) or 0
+
+local merged = cjson.encode(existing)
+redis.call('SET', KEYS[1], merged, 'EX', tonumber(ARGV[2]))
+return merged
+`;
+
+export class RedisSessionStore implements SessionStore {
+  private readonly redis: Redis;
+  private readonly ttl: number;
+
+  constructor(redis: Redis, ttl: number = DEFAULT_TTL_SECONDS) {
+    this.redis = redis;
+    this.ttl = ttl;
+  }
+
+  async get(sessionId: string): Promise<AgentState | null> {
+    const raw = await this.redis.get(`${KEY_PREFIX}${sessionId}`);
+    if (!raw) return null;
+    return deserialize(raw);
+  }
+
+  async set(sessionId: string, state: AgentState): Promise<void> {
+    await this.redis.set(
+      `${KEY_PREFIX}${sessionId}`,
+      serialize(state),
+      "EX",
+      this.ttl
+    );
+  }
+
+  async close(): Promise<void> {
+    await this.redis.quit();
+  }
+
+  async merge(sessionId: string, patch: Partial<AgentState>): Promise<AgentState> {
+    const patchMessages = patch.messages ?? [];
+    const { messages: _, ...patchData } = patch;
+
+    const patchPayload: SerializedState = {
+      data: patchData as Omit<AgentState, "messages">,
+      messages: mapChatMessagesToStoredMessages(patchMessages as BaseMessage[]),
+    };
+
+    const result = await this.redis.eval(
+      MERGE_LUA,
+      1,
+      `${KEY_PREFIX}${sessionId}`,
+      JSON.stringify(patchPayload),
+      String(this.ttl),
+      String(Date.now())
+    ) as string | null;
+
+    if (!result) {
+      throw new Error(`session not found: ${sessionId}`);
+    }
+
+    return deserialize(result);
+  }
+}
+
+// ── In-Memory Session Store (fallback / testing) ───────────────────────────
 
 interface SessionSnapshot {
   state: AgentState;
   updatedAt: number;
 }
 
-export class InMemorySessionStore {
+export class InMemorySessionStore implements SessionStore {
   private readonly sessions: Map<string, SessionSnapshot> = new Map();
 
-  get(sessionId: string): AgentState | null {
+  async get(sessionId: string): Promise<AgentState | null> {
     return this.sessions.get(sessionId)?.state ?? null;
   }
 
-  set(sessionId: string, state: AgentState): void {
+  async set(sessionId: string, state: AgentState): Promise<void> {
     this.sessions.set(sessionId, { state, updatedAt: Date.now() });
   }
 
-  merge(sessionId: string, patch: Partial<AgentState>): AgentState {
-    const existing = this.get(sessionId);
+  async merge(sessionId: string, patch: Partial<AgentState>): Promise<AgentState> {
+    const existing = await this.get(sessionId);
     if (!existing) {
       throw new Error(`session not found: ${sessionId}`);
     }
@@ -30,12 +165,68 @@ export class InMemorySessionStore {
     const nextState: AgentState = {
       ...existing,
       ...patch,
-      messages: nextMessages as BaseMessage[]
+      messages: nextMessages as BaseMessage[],
     };
 
-    this.set(sessionId, nextState);
+    await this.set(sessionId, nextState);
     return nextState;
   }
 }
 
-export const sessionStore = new InMemorySessionStore();
+// ── Factory ────────────────────────────────────────────────────────────────
+
+let _store: SessionStore | null = null;
+
+export function createSessionStore(redisUrl?: string): SessionStore {
+  if (_store) return _store;
+
+  if (redisUrl) {
+    try {
+      const redis = new Redis(redisUrl, {
+        maxRetriesPerRequest: 3,
+        enableReadyCheck: false,
+        lazyConnect: true,
+      });
+
+      redis.on("error", (err) => {
+        logger.error({ err: err.message }, "session-store redis error");
+      });
+
+      // Eagerly connect (non-blocking)
+      redis.connect().catch((err) => {
+        logger.warn({ err: err.message }, "session-store redis connect failed, falling back to in-memory");
+      });
+
+      _store = new RedisSessionStore(redis);
+      logger.info("session-store using Redis store");
+      return _store;
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, "session-store failed to create Redis store, falling back to in-memory");
+    }
+  }
+
+  _store = new InMemorySessionStore();
+  logger.info("session-store using in-memory store");
+  return _store;
+}
+
+/** Get the singleton store (creates InMemorySessionStore if not initialized) */
+export function getSessionStore(): SessionStore {
+  if (!_store) {
+    _store = new InMemorySessionStore();
+  }
+  return _store;
+}
+
+/** Reset singleton (for testing) */
+export function resetSessionStore(): void {
+  _store = null;
+}
+
+/** Close the singleton store and release resources (call during graceful shutdown) */
+export async function closeSessionStore(): Promise<void> {
+  if (_store?.close) {
+    await _store.close();
+  }
+  _store = null;
+}

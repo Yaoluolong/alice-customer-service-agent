@@ -22,17 +22,18 @@ const readSoulPromptMarkdown = async (): Promise<string | null> => {
   }
 };
 
-const buildPrompt = async (taskInstruction: string): Promise<string> => {
-  const soulMarkdown = await readSoulPromptMarkdown();
+const buildPrompt = async (taskInstruction: string, soulPromptOverride?: string): Promise<string> => {
+  const soulMarkdown = soulPromptOverride ?? await readSoulPromptMarkdown();
   if (!soulMarkdown) {
     throw new Error("缺少客服人设配置：请在项目根目录创建并填写 agents/SOUL.md");
   }
   return [soulMarkdown, "", "任务规则：", taskInstruction].join("\n");
 };
 
-export const buildRouterSystemPrompt = async (): Promise<string> =>
+export const buildRouterSystemPrompt = async (soulPrompt?: string): Promise<string> =>
   buildPrompt(
-    "你是客服路由器。只输出一个意图: visual_search/product_inquiry/order_status/general_chat/unknown。若 has_image=true 必须输出 visual_search。禁止输出其他内容。"
+    "你是客服路由器。只输出一个意图: visual_search/product_inquiry/order_status/general_chat/unknown。若 has_image=true 必须输出 visual_search。禁止输出其他内容。",
+    soulPrompt
   );
 
 export const buildComposerSystemPrompt = async (params: {
@@ -41,6 +42,7 @@ export const buildComposerSystemPrompt = async (params: {
   userTone: UserTone;
   openingHint: string;
   closingHint: string;
+  soulPrompt?: string;
 }): Promise<string> => {
   const languageHint = params.language === "en-US" ? "Respond in natural English." : "使用自然中文回复。";
   const instruction = [
@@ -48,6 +50,8 @@ export const buildComposerSystemPrompt = async (params: {
     "回复必须按四段式自然融合：理解用户 -> 给出事实 -> 给出动作 -> 收束语气。",
     "只允许引用输入中的 grounding facts，不得编造库存、订单、物流、价格。",
     "信息不确定时，必须使用：说明不确定 + 要求补充 + 给替代路径。",
+    "若输入包含 customer_profile 或 customer_preferences，自然地融入回复中，体现个性化服务，但不要使用【根据您的历史记录】等机械表达。",
+    "若有过往互动摘要（past_interactions），可作为背景参考，但不要直接引用。",
     `语气偏好：${params.userTone}；风格：${JSON.stringify(params.styleProfile)}。`,
     `开场建议：${params.openingHint}`,
     `收束建议：${params.closingHint}`,
@@ -56,10 +60,10 @@ export const buildComposerSystemPrompt = async (params: {
     "直接输出给用户的最终回复，不要输出解释。"
   ].join("\n");
 
-  return buildPrompt(instruction);
+  return buildPrompt(instruction, params.soulPrompt);
 };
 
-export const buildReviewerSystemPrompt = async (language: string): Promise<string> => {
+export const buildReviewerSystemPrompt = async (language: string, soulPrompt?: string): Promise<string> => {
   const instruction = [
     "你是客服回复审校器。请基于输入内容严格评分并输出 JSON。",
     "评分维度：事实一致性(0.5)、可执行性(0.2)、自然度(0.2)、重复模板惩罚(0.1)。",
@@ -68,5 +72,5 @@ export const buildReviewerSystemPrompt = async (language: string): Promise<strin
     language === "en-US" ? "Reasons should be in English." : "Reasons 使用中文。"
   ].join("\n");
 
-  return buildPrompt(instruction);
+  return buildPrompt(instruction, soulPrompt);
 };

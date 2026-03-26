@@ -2,24 +2,40 @@ import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { v4 as uuidv4 } from "uuid";
 import { appConfig } from "./config/env";
 import { buildCustomerServiceGraph } from "./graph";
-import { sessionStore } from "./sessionStore";
-import { ChatInput, ChatResult, RouteTarget, UserIntent, createInitialState } from "./types";
+import { getSessionStore } from "./sessionStore";
+import { ChatInput, ChatResult, MemoryContext, RouteTarget, UserIntent, createInitialState } from "./types";
 import { getRecentConversationWindow } from "./utils/messages";
 
 const app = buildCustomerServiceGraph();
 
+const countMemories = (ctx: MemoryContext | null): number => {
+  if (!ctx) return 0;
+  return (
+    (ctx.shortTerm.recentMessages.length) +
+    (ctx.longTerm.profile ? 1 : 0) +
+    ctx.longTerm.preferences.length +
+    ctx.longTerm.entities.length +
+    ctx.longTerm.events.length
+  );
+};
+
 export class CustomerServiceAgentService {
   async chat(input: ChatInput): Promise<ChatResult> {
     const sessionId = input.sessionId ?? `session_${uuidv4()}`;
+    const store = getSessionStore();
 
-    const existing = sessionStore.get(sessionId);
+    const existing = await store.get(sessionId);
     const userMessage = new HumanMessage(input.text);
 
     const invocationState = existing
       ? {
           ...existing,
           user_id: input.userId,
+          tenant_id: input.tenantId,
+          customer_id: input.customerId,
+          tenant_config: input.tenantConfig ?? existing.tenant_config ?? null,
           image_context: input.image ?? null,
+          media_context: input.media ?? null,
           messages: getRecentConversationWindow(
             [...existing.messages, userMessage],
             appConfig.runtime.maxConversationMessages
@@ -39,13 +55,17 @@ export class CustomerServiceAgentService {
       : createInitialState({
           sessionId,
           userId: input.userId,
+          tenantId: input.tenantId,
+          customerId: input.customerId,
           userMessage,
           imageContext: input.image,
-          replyLanguage: appConfig.language.defaultReplyLanguage
+          mediaContext: input.media,
+          replyLanguage: appConfig.language.defaultReplyLanguage,
+          tenantConfig: input.tenantConfig
         });
 
     const finalState = await app.invoke(invocationState);
-    sessionStore.set(sessionId, finalState);
+    await store.set(sessionId, finalState);
 
     const lastAssistantMessage = [...finalState.messages]
       .reverse()
@@ -62,12 +82,14 @@ export class CustomerServiceAgentService {
       confidence: finalState.agent_confidence,
       handoffReason: finalState.handoff_reason ?? undefined,
       reviewFlags: finalState.review_flags,
-      replyLanguage: finalState.reply_language
+      replyLanguage: finalState.reply_language,
+      openVikingSessionId: finalState.openviking_session_id ?? "",
+      memoriesLoaded: countMemories(finalState.memory_context)
     };
   }
 
-  getSession(sessionId: string) {
-    return sessionStore.get(sessionId);
+  async getSession(sessionId: string) {
+    return getSessionStore().get(sessionId);
   }
 }
 

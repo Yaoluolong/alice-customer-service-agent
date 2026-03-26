@@ -10,7 +10,7 @@ import { responseReviewerNode } from "./nodes/responseReviewer";
 import { routerCondition, routerNode } from "./nodes/router";
 import { salesAgentNode } from "./nodes/salesAgent";
 import { visualAgentNode } from "./nodes/visualAgent";
-import { AgentState, RouteTarget, UserIntent } from "./types";
+import { AgentState, RouteTarget, TenantAgentConfig, UserIntent } from "./types";
 
 export const AgentStateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -19,10 +19,16 @@ export const AgentStateAnnotation = Annotation.Root({
   }),
   user_id: Annotation<string>,
   session_id: Annotation<string>,
+  tenant_id: Annotation<string>,
+  customer_id: Annotation<string>,
+  tenant_config: Annotation<TenantAgentConfig | null>,
   user_intent: Annotation<UserIntent>,
   route_target: Annotation<RouteTarget>,
   current_product_id: Annotation<string | null>,
   image_context: Annotation<AgentState["image_context"]>,
+  media_context: Annotation<AgentState["media_context"]>,
+  memory_context: Annotation<AgentState["memory_context"]>,
+  openviking_session_id: Annotation<string | null>,
   retrieved_products: Annotation<AgentState["retrieved_products"]>,
   user_preferences: Annotation<AgentState["user_preferences"]>,
   requires_human: Annotation<boolean>,

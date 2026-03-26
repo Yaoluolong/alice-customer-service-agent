@@ -190,7 +190,8 @@ export const responseComposerNode = async (state: AgentState): Promise<Partial<A
             styleProfile: state.style_profile,
             userTone,
             openingHint: opening.text,
-            closingHint: closing
+            closingHint: closing,
+            soulPrompt: state.tenant_config?.soulPrompt
           })
         ),
         new HumanMessage(
@@ -202,7 +203,10 @@ export const responseComposerNode = async (state: AgentState): Promise<Partial<A
             conversation_summary: state.conversation_summary,
             user_message: userText,
             facts_summary: factsSummary,
-            action_summary: actionSummary
+            action_summary: actionSummary,
+            customer_profile: state.memory_context?.longTerm?.profile ?? null,
+            customer_preferences: state.memory_context?.longTerm?.preferences?.slice(0, 5).map((p) => p.abstract).join("; ") ?? null,
+            past_interactions: state.memory_context?.shortTerm?.sessionSummaries?.slice(0, 2) ?? null
           })
         )
       ]);

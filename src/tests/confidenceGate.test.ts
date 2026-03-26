@@ -7,6 +7,8 @@ const buildState = (score: number): AgentState => {
   const initial = createInitialState({
     sessionId: "s_test",
     userId: "u_test",
+    tenantId: "tenant_test",
+    customerId: "u_test",
     userMessage: new HumanMessage("hi")
   });
 

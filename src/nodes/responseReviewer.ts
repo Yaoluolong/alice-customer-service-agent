@@ -3,6 +3,7 @@ import { z } from "zod";
 import { appConfig } from "../config/env";
 import { getConfiguredModel } from "../config/models";
 import { BANNED_MECHANICAL_PHRASES, buildReviewerSystemPrompt } from "../config/persona";
+import { logger } from "../logger";
 import { AgentState } from "../types";
 import { getLastAssistantText } from "../utils/messages";
 
@@ -97,7 +98,7 @@ export const responseReviewerNode = async (state: AgentState): Promise<Partial<A
   } else {
     try {
       const response = await llm.invoke([
-        new SystemMessage(await buildReviewerSystemPrompt(state.reply_language)),
+        new SystemMessage(await buildReviewerSystemPrompt(state.reply_language, state.tenant_config?.soulPrompt)),
         new HumanMessage(
           JSON.stringify({
             reply,
@@ -111,14 +112,11 @@ export const responseReviewerNode = async (state: AgentState): Promise<Partial<A
 
       payload = parseReviewPayload(String(response.content ?? ""));
       trace = "review:model";
-    } catch {
-      payload = {
-        score: 0,
-        flags: ["review_schema_parse_failed"],
-        reasons: ["审校结果解析失败"],
-        must_handoff: true
-      };
-      trace = "review:parse-failed";
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, "response-reviewer LLM review failed, falling back to heuristic");
+      payload = heuristicReview(state, reply);
+      payload.flags.push("llm_review_fallback");
+      trace = "review:llm-failed-heuristic-fallback";
     }
   }
 

@@ -1,91 +1,29 @@
 import "./config/env";
-import { createServer, IncomingMessage, ServerResponse } from "http";
-import { customerServiceAgentService } from "./service";
-import { ChatInput } from "./types";
+import { createAliceServer } from "./app";
+import { logger } from "./logger";
+import { createSessionStore, closeSessionStore } from "./sessionStore";
+import { startRequestWorker, stopWorker } from "./queues/worker";
 
 const PORT = Number(process.env.PORT ?? 3000);
 
-const sendJson = (res: ServerResponse, statusCode: number, payload: unknown): void => {
-  res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(payload));
-};
+// Initialize session store (Redis if REDIS_URL set, otherwise in-memory)
+createSessionStore(process.env.REDIS_URL);
 
-const readBody = async (req: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
+// Start BullMQ worker to consume request queue
+startRequestWorker();
 
-const parseChatInput = (body: string): ChatInput => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    throw new Error("invalid JSON body");
-  }
-
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("body must be an object");
-  }
-
-  const obj = parsed as Partial<ChatInput>;
-
-  if (!obj.userId || typeof obj.userId !== "string") {
-    throw new Error("userId is required");
-  }
-  if (!obj.text || typeof obj.text !== "string") {
-    throw new Error("text is required");
-  }
-
-  return {
-    userId: obj.userId,
-    sessionId: typeof obj.sessionId === "string" ? obj.sessionId : undefined,
-    text: obj.text,
-    image: obj.image
-  };
-};
-
-const server = createServer(async (req, res) => {
-  try {
-    if (!req.url || !req.method) {
-      sendJson(res, 400, { error: "invalid request" });
-      return;
-    }
-
-    if (req.method === "GET" && req.url === "/health") {
-      sendJson(res, 200, { ok: true, service: "multimodal-cs-agent" });
-      return;
-    }
-
-    if (req.method === "POST" && req.url === "/v1/chat") {
-      const body = await readBody(req);
-      const input = parseChatInput(body);
-      const result = await customerServiceAgentService.chat(input);
-      sendJson(res, 200, result);
-      return;
-    }
-
-    if (req.method === "GET" && req.url.startsWith("/v1/sessions/")) {
-      const sessionId = decodeURIComponent(req.url.replace("/v1/sessions/", ""));
-      const session = customerServiceAgentService.getSession(sessionId);
-      if (!session) {
-        sendJson(res, 404, { error: "session not found" });
-        return;
-      }
-      sendJson(res, 200, session);
-      return;
-    }
-
-    sendJson(res, 404, { error: "not found" });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "internal error";
-    sendJson(res, 500, { error: message });
-  }
-});
-
+// HTTP server for health checks + legacy /v1/chat endpoint
+const server = createAliceServer();
 server.listen(PORT, () => {
-  console.log(`[server] listening on http://localhost:${PORT}`);
-  console.log("[server] POST /v1/chat, GET /v1/sessions/:id, GET /health");
+  logger.info({ port: PORT }, "alice server listening");
 });
+
+const shutdown = async (): Promise<void> => {
+  await stopWorker();
+  await closeSessionStore();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  process.exit(0);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

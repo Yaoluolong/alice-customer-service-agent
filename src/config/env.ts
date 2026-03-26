@@ -9,6 +9,10 @@ export interface AgentConfig {
     primaryModel: string;
     auxModel: string;
   };
+  openviking: {
+    baseUrl: string;
+    apiKey: string | null;
+  };
   confidence: {
     threshold: number;
   };
@@ -79,12 +83,19 @@ export const parseAgentConfig = (env: NodeJS.ProcessEnv): AgentConfig => {
     ? supportedLanguages
     : [defaultReplyLanguage, ...supportedLanguages];
 
+  const ovBaseUrl = (env.OPENVIKING_BASE_URL?.trim() ?? "http://localhost:1933").replace(/\/+$/, "");
+  const ovApiKey = env.OPENVIKING_API_KEY?.trim() ?? "";
+
   return {
     openai: {
       apiKey: apiKey.length > 0 ? apiKey : null,
       baseUrl: baseUrl.length > 0 ? baseUrl : null,
       primaryModel,
       auxModel
+    },
+    openviking: {
+      baseUrl: ovBaseUrl,
+      apiKey: ovApiKey.length > 0 ? ovApiKey : null
     },
     confidence: {
       threshold: parseThreshold(env.AGENT_CONFIDENCE_THRESHOLD)
