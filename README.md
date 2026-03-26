@@ -1,99 +1,136 @@
-# Alice 多模态客服 Agent（TypeScript + LangGraph）
+# Alice — AI Agent Engine
 
-这是一个可运行的真人感客服 Agent 原型，支持文本+图片输入、结构化事实生成、自然语言回复、审校打分和信心阈值转人工。
+TypeScript/LangGraph.js agent engine for the openEcommerce SaaS platform. Processes inbound customer messages from the `alice-requests` BullMQ queue and returns AI-generated replies via the `alice-replies` queue.
 
-## 核心架构
+## Graph Flow
 
-执行链路固定为：
+Fixed pipeline defined in `src/graph.ts`:
 
-`memory_bootstrap -> router -> domain_worker -> response_composer -> response_reviewer -> confidence_gate -> (human_handoff | memory_persist)`
+```
+memoryBootstrap → router → [visual|sales|order|chat]Agent → responseComposer → responseReviewer → confidenceGate → (humanHandoff | memoryPersist)
+```
 
-### 节点职责
+| Node | Role |
+|------|------|
+| `memoryBootstrap` | Load short-term (session messages) and long-term (extracted memories) context from OpenViking |
+| `router` | Intent classification → route to domain agent (aux model) |
+| `visualAgent` | VLM image description + semantic product search |
+| `salesAgent` | Preference extraction + product search + inventory facts |
+| `orderAgent` | Order status query |
+| `chatAgent` | General conversation |
+| `responseComposer` | Four-segment natural reply using grounding facts (primary model) |
+| `responseReviewer` | Score response on fact consistency, executability, naturalness, repetition; falls back to heuristic scoring on LLM failure |
+| `confidenceGate` | Route below-threshold responses to humanHandoff |
+| `humanHandoff` | Generate context-aware handoff message |
+| `memoryPersist` | Save user + assistant messages to OpenViking; report used context URIs; trigger session commit at 20 turns |
 
-1. `memory_bootstrap`：加载用户偏好、风格、会话摘要（内部上下文，不直出给用户）
-2. `router`：意图识别与路由（辅助模型）
-3. `domain_worker`：
-- `visual_agent`：图文检索
-- `sales_agent`：库存与导购事实
-- `order_agent`：订单事实
-- `chat_agent`：闲聊/澄清事实
-4. `response_composer`：按“四段式真人客服”生成最终回复（主模型）
-5. `response_reviewer`：事实一致性、可执行性、自然度、重复度评分（辅助模型）
-6. `confidence_gate`：低于阈值转人工
-7. `human_handoff`：自然化转人工说明
-8. `memory_persist`：写回偏好、风格和会话摘要
+## Running
 
-## 运行
+### As BullMQ Worker (SaaS stack — default)
 
 ```bash
+# Via Docker Compose (recommended)
+docker compose up -d alice
+
+# Directly
+cd Alice
 npm install
-cp .env.example .env
 npm run build
-npm run dev
+node dist/server.ts   # initializes RedisSessionStore → starts BullMQ worker + HTTP server
 ```
 
-## 环境变量
-
-- `OPENAI_API_KEY`：OpenAI/兼容网关 Key（可选；不填时模型节点会走规则降级）
-- `OPENAI_BASE_URL`：兼容网关地址（如 Ollama：`http://127.0.0.1:11434/v1`）
-- `OPENAI_PRIMARY_MODEL`：主模型（必填）
-- `OPENAI_AUX_MODEL`：辅助模型（可选；缺失时回退主模型）
-- `AGENT_CONFIDENCE_THRESHOLD`：置信度阈值，默认 `0.7`，范围 `[0,1]`
-- `DEFAULT_REPLY_LANGUAGE`：默认回复语言，默认 `zh-CN`
-- `LANGUAGE_POLICY`：`auto` 或 `fixed`，默认 `auto`
-- `SUPPORTED_LANGUAGES`：支持语言列表，默认 `zh-CN,en-US`
-- `MAX_CONVERSATION_MESSAGES`：会话窗口大小，默认 `12`
-- `LLM_TIMEOUT_MS`：模型调用超时毫秒，默认 `45000`
-- `PORT`：HTTP 端口，默认 `3000`
-
-## API
-
-### 健康检查
+### HTTP Mode (dev/testing)
 
 ```bash
-curl http://localhost:3000/health
+cd Alice
+npm run dev:server   # ts-node src/server.ts, port 3000
 ```
 
-### 对话
+## Environment Variables
+
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `OPENAI_PRIMARY_MODEL` | Yes | — | Must be set; startup fails otherwise |
+| `OPENAI_API_KEY` | No | — | Empty string = heuristic fallback (no LLM calls) |
+| `OPENAI_BASE_URL` | No | — | OpenAI-compatible endpoint |
+| `OPENAI_AUX_MODEL` | No | = primary | Auxiliary model for router/reviewer |
+| `OPENVIKING_BASE_URL` | No | `http://localhost:1933` | |
+| `OPENVIKING_API_KEY` | No | — | |
+| `REDIS_URL` | No | `redis://localhost:6379` | Session store + distributed lock; falls back to in-memory if unset |
+| `AGENT_CONFIDENCE_THRESHOLD` | No | `0.7` | 0–1; below threshold → human handoff |
+| `DEFAULT_REPLY_LANGUAGE` | No | `zh-CN` | |
+| `LANGUAGE_POLICY` | No | `auto` | `auto` / `fixed` |
+| `SUPPORTED_LANGUAGES` | No | `zh-CN,en-US` | Comma-separated |
+| `MAX_CONVERSATION_MESSAGES` | No | `12` | 6–40 |
+| `LLM_TIMEOUT_MS` | No | `45000` | 1000–120000 |
+| `LOG_LEVEL` | No | `info` | Pino log level |
+| `PORT` | No | `3000` | HTTP server port |
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check |
+| GET | `/metrics` | Prometheus metrics |
+| POST | `/v1/chat` | Process chat message (internal, called by worker) |
+| GET | `/v1/sessions/:id` | Get session state |
+
+## Directory Structure
+
+```
+src/
+├── server.ts              # Entry: RedisSessionStore → BullMQ worker → HTTP listen
+├── app.ts                 # createAliceServer() — http.Server factory
+├── service.ts             # CustomerServiceAgentService — session management + graph invocation
+├── graph.ts               # LangGraph StateGraph definition
+├── types.ts               # AgentState, GroundingFact, ChatInput/ChatResult
+├── sessionStore.ts        # RedisSessionStore (24h TTL, Lua merge) + InMemorySessionStore
+├── logger.ts              # Pino structured logger
+├── metrics.ts             # Prometheus metrics (prom-client)
+├── config/
+│   ├── env.ts             # parseAgentConfig(process.env) — singleton, requires OPENAI_PRIMARY_MODEL
+│   ├── models.ts          # LLM instance factory
+│   └── persona.ts         # Prompt builders for router/composer/reviewer
+├── clients/
+│   ├── openviking-client.ts   # OpenViking HTTP client with cockatiel circuit breaker
+│   └── resolve-ov-client.ts   # resolveOvClient(config) — DI via LangGraph configurable
+├── nodes/
+│   ├── memoryNode.ts      # memoryBootstrapNode + memoryPersistNode
+│   ├── router.ts          # Intent classification
+│   ├── visualAgent.ts     # VLM + visual search
+│   ├── salesAgent.ts      # Product search + inventory
+│   ├── orderAgent.ts      # Order status
+│   ├── chatAgent.ts       # General conversation
+│   ├── responseComposer.ts
+│   ├── responseReviewer.ts
+│   ├── confidenceGate.ts
+│   └── humanHandoff.ts
+└── queues/
+    └── worker.ts          # BullMQ worker: consume alice-requests → produce alice-replies
+```
+
+## Testing
+
+### Unit Tests
 
 ```bash
-curl -X POST http://localhost:3000/v1/chat \
-  -H 'content-type: application/json' \
-  -d '{
-    "userId": "user_10001",
-    "text": "[上传了一张红色风衣图片] 这个有红色的吗？我平时穿M码。",
-    "image": {
-      "imageId": "img_red_trench_001",
-      "mimeType": "image/png",
-      "filePath": "/tmp/red-trench.png"
-    }
-  }'
+npm test   # ts-node src/tests/run.ts
 ```
 
-返回新增字段：
-
-- `confidence`
-- `reviewFlags`
-- `handoffReason`
-- `replyLanguage`
-
-## 测试
+### E2E Tests (no Docker required)
 
 ```bash
-npm test
+npm run test:e2e   # Vitest, uses nock to mock OpenViking HTTP
 ```
 
-当前包含：
+E2E tests set `OPENAI_API_KEY=""` and `OPENAI_PRIMARY_MODEL="test-model"` to force heuristic paths (no real LLM calls). OpenViking is mocked via nock on host `openviking-mock.test`.
 
-1. env 解析与阈值边界测试
-2. 语言策略（auto/fixed）测试
-3. reviewer JSON 解析测试
-4. confidence gate 规则测试（0.69/0.7/1.0）
+Key test files in `tests/e2e/`:
 
-## 目录
-
-- `src/config/env.ts`：统一配置解析（模型、阈值、语言）
-- `src/config/models.ts`：主/辅模型实例工厂
-- `src/config/persona.ts`：router/composer/reviewer prompt 构建
-- `src/nodes/*`：图节点实现
-- `src/tests/*`：基础单元测试
+| File | Coverage |
+|------|----------|
+| `health.test.ts` | `/health`, 404, error handling |
+| `chat-routing.test.ts` | Intent classification → routing |
+| `chat-media.test.ts` | Media messages → visual agent |
+| `confidence.test.ts` | Confidence threshold + handoff |
+| `session-lifecycle.test.ts` | Session create, resume, query |
