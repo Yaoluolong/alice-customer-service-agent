@@ -58,11 +58,11 @@ const EN_OPENING_POOL: Record<UserTone, VariationTemplate[]> = {
     { id: "en_u_5", text: "I hear you, let's go straight to the point." }
   ],
   confused: [
-    { id: "en_c_1", text: "I can see why this feels confusing, let me break it down clearly." },
-    { id: "en_c_2", text: "Good question. I'll walk you through the key points step by step." },
-    { id: "en_c_3", text: "No worries, I'll make this simple and clear." },
-    { id: "en_c_4", text: "You're asking the right thing, here's the clear version." },
-    { id: "en_c_5", text: "Let me simplify this for you." }
+    { id: "en_c_1", text: "Totally get it — let me clear this up for you, love." },
+    { id: "en_c_2", text: "Right, so here's the thing —" },
+    { id: "en_c_3", text: "Okay, so —" },
+    { id: "en_c_4", text: "Ha, it's a fair thing to wonder! So:" },
+    { id: "en_c_5", text: "Great minds wonder! Here's the honest answer:" }
   ],
   polite: [
     { id: "en_p_1", text: "Thanks for the details. I've checked the key information for you." },
@@ -79,11 +79,11 @@ const EN_OPENING_POOL: Record<UserTone, VariationTemplate[]> = {
     { id: "en_b_5", text: "Makes sense. Quick summary:" }
   ],
   neutral: [
-    { id: "en_n_1", text: "I understand your request. Here's what I can confirm now." },
-    { id: "en_n_2", text: "Got it. Let me share the key result and next step." },
-    { id: "en_n_3", text: "Thanks, I've checked the relevant details for you." },
-    { id: "en_n_4", text: "Understood. Here's the current status and what you can do next." },
-    { id: "en_n_5", text: "I can help with that. Here's the confirmed information." }
+    { id: "en_n_1", text: "Right, so —" },
+    { id: "en_n_2", text: "Okay love, so here's the deal:" },
+    { id: "en_n_3", text: "Brilliant question, and the answer's simpler than you'd think:" },
+    { id: "en_n_4", text: "Here's what I know:" },
+    { id: "en_n_5", text: "So —" }
   ]
 };
 

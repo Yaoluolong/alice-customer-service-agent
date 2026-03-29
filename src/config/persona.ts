@@ -9,7 +9,13 @@ export const BANNED_MECHANICAL_PHRASES = [
   "系统检测到",
   "当前请求需要人工处理",
   "system detected",
-  "request requires manual processing"
+  "request requires manual processing",
+  // EN opening pool phrases that contradict SOUL.md "no filler" directive
+  "good question. i'll walk you through",
+  "no worries, i'll make this simple and clear",
+  "i can see why this feels confusing, let me break it down clearly",
+  "i'll walk you through the key points step by step",
+  "let me simplify this for you"
 ];
 
 const readSoulPromptMarkdown = async (): Promise<string | null> => {
@@ -32,7 +38,7 @@ const buildPrompt = async (taskInstruction: string, soulPromptOverride?: string)
 
 export const buildRouterSystemPrompt = async (soulPrompt?: string): Promise<string> =>
   buildPrompt(
-    "你是客服路由器。只输出一个意图: visual_search/knowledge_query/product_inquiry/order_status/general_chat/unknown。若 has_media=true 必须输出 visual_search。knowledge_query 用于退换货政策、售后、保修、运费等规则类问题；product_inquiry 用于商品咨询、库存、价格、推荐。禁止输出其他内容。",
+    "你是客服路由器。只输出一个意图: visual_search/knowledge_query/product_inquiry/order_status/general_chat/unknown。若 has_media=true 必须输出 visual_search。knowledge_query 用于：退换货政策、售后、保修、运费、支付方式、关税、下单流程、商品保养与护理方法、正品验货说明、团队介绍、折扣码政策、货到付款、批发询价等规则/流程类问题；product_inquiry 用于商品咨询、库存、价格、推荐、尺码对比。禁止输出其他内容。",
     soulPrompt
   );
 
@@ -69,6 +75,8 @@ export const buildReviewerSystemPrompt = async (language: string, soulPrompt?: s
     "评分维度：事实一致性(0.5)、可执行性(0.2)、自然度(0.2)、重复模板惩罚(0.1)。",
     "输出必须是 JSON 对象，字段固定：score(0-1), flags(string[]), reasons(string[]), must_handoff(boolean)。",
     `若发现机械词（${BANNED_MECHANICAL_PHRASES.join("/")}）需加入 flags。`,
+    "must_handoff 仅在以下情况设为 true：回复包含明确的错误数字（如错误的价格、错误的订单号）并被当作事实陈述。",
+    "品牌或商品不匹配（如客户问A品牌但知识库只有B品牌）不得触发 must_handoff，应降低 score 但保持 must_handoff=false，因为客服无法控制知识库覆盖范围。",
     language === "en-US" ? "Reasons should be in English." : "Reasons 使用中文。"
   ].join("\n");
 
