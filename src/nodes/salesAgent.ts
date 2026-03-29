@@ -125,7 +125,7 @@ export const salesAgentNode = async (state: AgentState, config?: RunnableConfig)
         state.tenant_id,
         state.customer_id,
         userText,
-        state.openviking_session_id ?? undefined,
+        state.openviking_session_id?.startsWith("local_") ? undefined : (state.openviking_session_id ?? undefined),
         tenantConfig?.knowledgeSchema?.searchScopes?.product_inquiry ?? "viking://resources/products/",
         5
       );
@@ -168,11 +168,22 @@ export const salesAgentNode = async (state: AgentState, config?: RunnableConfig)
     (item) => item.color === color && item.size === size && item.available > 0
   );
 
+  // Enrich product description with L2 detail from OpenViking if URI available
+  let productDetail = product.name;
+  if (product.imageUrl?.startsWith("viking://") && state.tenant_id) {
+    try {
+      const detail = await openVikingClient.readDetail(state.tenant_id, state.customer_id, product.imageUrl);
+      if (detail) productDetail = detail.slice(0, 2000);
+    } catch {
+      // Fallback to product name
+    }
+  }
+
   const facts: GroundingFacts = {
     intent: UserIntent.PRODUCT_INQUIRY,
     fact_confidence: sku ? 0.92 : 0.76,
     facts: [
-      { key: "product_name", value: product.name, source: "retrieval", confidence: 0.9, sourceUri: product.imageUrl },
+      { key: "product_name", value: productDetail, source: "retrieval", confidence: 0.9, sourceUri: product.imageUrl },
       { key: "price", value: `¥${product.price}`, source: "retrieval", confidence: 0.9 },
       { key: "preferred_color", value: color, source: "memory", confidence: 0.8 },
       { key: "preferred_size", value: size, source: "memory", confidence: 0.8 },

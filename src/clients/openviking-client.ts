@@ -128,7 +128,7 @@ export class OpenVikingHttpClient {
     const res = await this.breaker.execute(() =>
       this.http.post(
         "/api/v1/search/find",
-        { query, target_uri: targetUri ?? `viking://user/${customerId}/memories/`, limit },
+        { query, target_uri: targetUri ?? "viking://user/memories/", limit },
         { headers: this.headers(tenantId, customerId) }
       )
     );
@@ -167,6 +167,28 @@ export class OpenVikingHttpClient {
       )
     );
     return res.data.result as SearchResult;
+  }
+
+  /** Get L1 overview (~2k tokens) for a viking:// URI */
+  async getOverview(tenantId: string, customerId: string, uri: string): Promise<string> {
+    const res = await this.breaker.execute(() =>
+      this.http.get("/api/v1/content/overview", {
+        params: { uri },
+        headers: this.headers(tenantId, customerId)
+      })
+    );
+    return (res.data.result ?? "") as string;
+  }
+
+  /** Get L2 full detail for a viking:// URI */
+  async readDetail(tenantId: string, customerId: string, uri: string): Promise<string> {
+    const res = await this.breaker.execute(() =>
+      this.http.get("/api/v1/content/read", {
+        params: { uri },
+        headers: this.headers(tenantId, customerId)
+      })
+    );
+    return (res.data.result ?? "") as string;
   }
 
   async sessionUsed(

@@ -20,11 +20,12 @@ npm run test:e2e     # vitest run (E2E 测试，不需要 Docker)
 固定链式流水线，定义在 `src/graph.ts`：
 
 ```
-memoryBootstrap → router → [visual|sales|order|chat]Agent → responseComposer → responseReviewer → confidenceGate → (humanHandoff | memoryPersist)
+memoryBootstrap → router → [visual|sales|order|chat|knowledge]Agent → responseComposer → responseReviewer → confidenceGate → (humanHandoff | memoryPersist)
 ```
 
 - `visual_agent → sales_agent` 串联（图搜后查库存）
 - `confidenceGate` 决定是继续回复（→ memoryPersist）还是转人工（→ humanHandoff → memoryPersist）
+- `router` 检查 `tenant_config.enabledAgents`，禁用的 agent fallback 到 `chat_agent`（`HUMAN_HANDOFF` 不受此限制）
 
 ### Key Files
 
@@ -37,7 +38,8 @@ memoryBootstrap → router → [visual|sales|order|chat]Agent → responseCompos
 | `src/server.ts` | 入口：初始化 `RedisSessionStore` → `startRequestWorker()` → `createAliceServer().listen(PORT)` |
 | `src/config/env.ts` | `parseAgentConfig(process.env)` — 模块加载时解析配置（singleton），要求 `OPENAI_PRIMARY_MODEL` |
 | `src/config/models.ts` | `getConfiguredModel()` — LLM 实例工厂 |
-| `src/clients/openviking-client.ts` | OpenViking HTTP 客户端（带断路器），`search()`、`find()`、`sessionUsed()` 等 |
+| `src/clients/openviking-client.ts` | OpenViking HTTP 客户端（带断路器），`search()`、`find()`、`readDetail()`、`getOverview()`、`sessionUsed()` 等 |
+| `src/utils/video-frame.ts` | `extractFirstFrame(buffer)` — 调 ffmpeg 提取视频首帧返回 JPEG base64 |
 | `src/clients/resolve-ov-client.ts` | `resolveOvClient(config)` — 从 LangGraph `configurable` 获取注入的 OV client 或 fallback 到单例 |
 | `src/sessionStore.ts` | `RedisSessionStore`（Redis 存储，Lua 原子 merge，24h TTL）+ `InMemorySessionStore`（fallback） |
 | `src/logger.ts` | Pino 结构化日志（`logger` + `childLogger(ctx)`） |
@@ -53,6 +55,7 @@ memoryBootstrap → router → [visual|sales|order|chat]Agent → responseCompos
 | `salesAgent.ts` | 偏好提取 + `search()` 商品搜索 + 库存查询。接受 `RunnableConfig` 用于 OV client DI |
 | `orderAgent.ts` | 订单状态查询 |
 | `chatAgent.ts` | 通用闲聊 |
+| `knowledgeAgent.ts` | FAQ / 政策类问答，搜索 `viking://resources/knowledge/`，top-1 拉 L2 detail |
 | `responseComposer.ts` | 基于 grounding facts 生成回复 |
 | `responseReviewer.ts` | 回复审查 + 打分。LLM 审查失败时 **降级到启发式评分**（不再强制转人工） |
 | `confidenceGate.ts` | 置信度阈值判断（默认 0.7） |
@@ -81,9 +84,10 @@ memoryBootstrap → router → [visual|sales|order|chat]Agent → responseCompos
 1. 从 `alice-requests` 队列消费
 2. 获取分布式会话锁
 3. **异步下载媒体**（如有 URL 无 base64）
-4. 调用 `customerServiceAgentService.chat()`
-5. 将结果入队 `alice-replies`
-6. 释放会话锁
+4. **视频首帧提取**（mediaType=video 时，调 ffmpeg 提取首帧，mimeType 转为 image/jpeg）
+5. 调用 `customerServiceAgentService.chat()`
+6. 将结果入队 `alice-replies`
+7. 释放会话锁
 
 队列类型从 `@opencommerce/shared-types` 导入。Payload 包含 `correlationId`，不含 `channelConfig`。
 
@@ -94,7 +98,9 @@ memoryBootstrap → router → [visual|sales|order|chat]Agent → responseCompos
 - **`search()`**（首选）— 会话感知搜索，通过 `POST /api/v1/search/search` 传入 `session_id`，OV 利用对话上下文改善搜索质量
 - **`findMemories()` / `searchKnowledge()`**（fallback）— 纯向量搜索 `POST /api/v1/search/find`，不带会话上下文
 
-`memoryBootstrapNode` 优先用 `search()`，失败回退到 `findMemories()`。`visualAgent` 和 `salesAgent` 直接用 `search()`。
+搜索时通过 `target_uri` 限定范围：`viking://user/memories/`（记忆）、`viking://resources/products/`（商品）等。用户隔离由 `X-OpenViking-User` header 保证，URI 中不含 customerId。
+
+`memoryBootstrapNode` 优先用 `search()`，失败回退到 `findMemories()`。`visualAgent`、`salesAgent`、`knowledgeAgent` 直接用 `search()`，并对 top-1 结果调 `readDetail()` 获取 L2 完整内容注入 grounding facts。
 
 ### 断路器
 
@@ -124,8 +130,11 @@ Domain agents（`memoryNode`、`visualAgent`、`salesAgent`）通过 `resolveOvC
 
 ### URI Namespace
 
-- `viking://user/{customerId}/memories/` — 用户长期记忆
+- `viking://user/memories/` — 用户长期记忆（由 `X-OpenViking-User` header 隔离）
 - `viking://resources/products/` — 商品知识库
+- `viking://agent/memories/` — Agent 跨客户知识（cases/patterns）
+
+> 详细目录结构见 [docs/OPENVIKING-DIRECTORY.md](../docs/OPENVIKING-DIRECTORY.md)
 
 ## GroundingFact
 

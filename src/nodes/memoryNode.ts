@@ -83,13 +83,13 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
       memResult = await openVikingClient.search(
         tenant_id, customer_id, query,
         ovSessionId?.startsWith("local_") ? undefined : ovSessionId ?? undefined,
-        `viking://user/${customer_id}/memories/`,
+        "viking://user/memories/",
         15
       );
     } catch {
       memResult = await openVikingClient.findMemories(
         tenant_id, customer_id, query,
-        `viking://user/${customer_id}/memories/`,
+        "viking://user/memories/",
         15
       );
     }

@@ -110,6 +110,17 @@ export const visualAgentNode = async (state: AgentState, config?: RunnableConfig
 
   const top = products[0] ?? null;
 
+  // Enrich top-1 result with L2 detail
+  let topDetail = top ? `${top.name}（相似度 ${(top.similarityScore ?? 0).toFixed(2)}）` : "";
+  if (top?.imageUrl?.startsWith("viking://")) {
+    try {
+      const detail = await openVikingClient.readDetail(state.tenant_id, state.customer_id, top.imageUrl);
+      if (detail) topDetail = detail.slice(0, 2000);
+    } catch {
+      // Fallback to name
+    }
+  }
+
   const grounding: GroundingFacts = top
     ? {
         intent: UserIntent.VISUAL_SEARCH,
@@ -117,7 +128,7 @@ export const visualAgentNode = async (state: AgentState, config?: RunnableConfig
         facts: [
           {
             key: "top_candidate",
-            value: `${top.name}（相似度 ${(top.similarityScore ?? 0).toFixed(2)}）`,
+            value: topDetail,
             source: "retrieval",
             confidence: 0.78,
             sourceUri: top.imageUrl

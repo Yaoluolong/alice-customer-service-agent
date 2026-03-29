@@ -1,35 +1,34 @@
 import "./config/env";
 import { customerServiceAgentService } from "./service";
-import { ImageContext } from "./types";
 
 const main = async (): Promise<void> => {
-  const image: ImageContext = {
-    imageId: "img_red_trench_001",
-    filePath: "/tmp/red-trench.png",
-    mimeType: "image/png"
-  };
-
+  // 第一轮：商品查询（匹配实际 Chanel 数据）
   const first = await customerServiceAgentService.chat({
     tenantId: "tenant_demo",
     customerId: "user_10001",
     userId: "user_10001",
-    text: "[上传了一张红色风衣图片] 这个有红色的吗？我平时穿M码。",
-    image
+    text: "我想看看 Chanel 的包包，有黑色 Classic Flap 吗？"
   });
 
-  console.log("\n=== 第一轮 ===");
-  console.log(first);
+  console.log("\n=== 第一轮（商品查询）===");
+  console.log("route:", first.route);
+  console.log("reply:", first.reply);
+  console.log("sessionId:", first.sessionId);
+  console.log("confidence:", first.confidence);
 
+  // 第二轮：政策咨询
   const second = await customerServiceAgentService.chat({
     tenantId: "tenant_demo",
     customerId: "user_10001",
     userId: "user_10001",
     sessionId: first.sessionId,
-    text: "那订单 ORD-20260308-1001 现在到哪了？"
+    text: "你们的退换货政策是什么？"
   });
 
-  console.log("\n=== 第二轮 ===");
-  console.log(second);
+  console.log("\n=== 第二轮（政策咨询）===");
+  console.log("route:", second.route);
+  console.log("reply:", second.reply);
+  console.log("confidence:", second.confidence);
 };
 
 main().catch((error: unknown) => {

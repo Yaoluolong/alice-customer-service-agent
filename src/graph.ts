@@ -3,6 +3,7 @@ import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { chatAgentNode } from "./nodes/chatAgent";
 import { confidenceGateCondition, confidenceGateNode } from "./nodes/confidenceGate";
 import { humanHandoffNode } from "./nodes/humanHandoff";
+import { knowledgeAgentNode } from "./nodes/knowledgeAgent";
 import { memoryBootstrapNode, memoryPersistNode } from "./nodes/memoryNode";
 import { orderAgentNode } from "./nodes/orderAgent";
 import { responseComposerNode } from "./nodes/responseComposer";
@@ -61,6 +62,7 @@ export const buildCustomerServiceGraph = () => {
     .addNode(RouteTarget.SALES_AGENT, salesAgentNode)
     .addNode(RouteTarget.ORDER_AGENT, orderAgentNode)
     .addNode(RouteTarget.CHAT_AGENT, chatAgentNode)
+    .addNode(RouteTarget.KNOWLEDGE_AGENT, knowledgeAgentNode)
     .addNode("response_composer", responseComposerNode)
     .addNode("response_reviewer", responseReviewerNode)
     .addNode("confidence_gate", confidenceGateNode)
@@ -73,12 +75,14 @@ export const buildCustomerServiceGraph = () => {
       [RouteTarget.SALES_AGENT]: RouteTarget.SALES_AGENT,
       [RouteTarget.ORDER_AGENT]: RouteTarget.ORDER_AGENT,
       [RouteTarget.CHAT_AGENT]: RouteTarget.CHAT_AGENT,
+      [RouteTarget.KNOWLEDGE_AGENT]: RouteTarget.KNOWLEDGE_AGENT,
       [RouteTarget.HUMAN_HANDOFF]: RouteTarget.HUMAN_HANDOFF
     })
     .addEdge(RouteTarget.VISUAL_AGENT, RouteTarget.SALES_AGENT)
     .addEdge(RouteTarget.SALES_AGENT, "response_composer")
     .addEdge(RouteTarget.ORDER_AGENT, "response_composer")
     .addEdge(RouteTarget.CHAT_AGENT, "response_composer")
+    .addEdge(RouteTarget.KNOWLEDGE_AGENT, "response_composer")
     .addEdge("response_composer", "response_reviewer")
     .addEdge("response_reviewer", "confidence_gate")
     .addConditionalEdges("confidence_gate", confidenceGateCondition, {

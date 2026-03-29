@@ -4,6 +4,7 @@ import Redis from "ioredis";
 import { logger } from "../logger";
 import { customerServiceAgentService } from "../service";
 import { QUEUE_NAMES, RequestJobData, ReplyJobData } from "./types";
+import { extractFirstFrame } from "../utils/video-frame";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const CONCURRENCY = Number(process.env.QUEUE_CONCURRENCY ?? "5");
@@ -135,6 +136,22 @@ export function startRequestWorker(): Worker<RequestJobData> {
             };
           } catch (err) {
             logger.warn({ correlationId, err: (err as Error).message }, "media download failed, proceeding without base64");
+          }
+        }
+
+        // Extract first frame from video so VLM receives an image, not raw video bytes
+        if (resolvedMedia?.mediaType === "video" && resolvedMedia.base64Data) {
+          try {
+            const videoBuffer = Buffer.from(resolvedMedia.base64Data, "base64");
+            const frameBase64 = await extractFirstFrame(videoBuffer);
+            resolvedMedia = {
+              ...resolvedMedia,
+              base64Data: frameBase64,
+              mimeType: "image/jpeg",
+              // Keep mediaType: "video" so downstream nodes know the original type
+            };
+          } catch (err) {
+            logger.warn({ correlationId, err: (err as Error).message }, "video frame extraction failed, proceeding with raw video data");
           }
         }
 

@@ -50,6 +50,7 @@ export enum UserIntent {
   GENERAL_CHAT = "general_chat",
   VISUAL_SEARCH = "visual_search",
   VIDEO_SEARCH = "video_search",
+  KNOWLEDGE_QUERY = "knowledge_query",
   UNKNOWN = "unknown"
 }
 
@@ -58,6 +59,7 @@ export enum RouteTarget {
   SALES_AGENT = "sales_agent",
   ORDER_AGENT = "order_agent",
   CHAT_AGENT = "chat_agent",
+  KNOWLEDGE_AGENT = "knowledge_agent",
   HUMAN_HANDOFF = "human_handoff"
 }
 

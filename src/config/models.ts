@@ -18,6 +18,7 @@ export const getConfiguredModel = (role: ModelRole, temperature: number): ChatOp
     model: modelName,
     temperature,
     timeout: appConfig.runtime.llmTimeoutMs,
+    streaming: false,
     apiKey: appConfig.openai.apiKey,
     configuration: appConfig.openai.baseUrl
       ? {

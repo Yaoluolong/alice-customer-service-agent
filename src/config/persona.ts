@@ -32,7 +32,7 @@ const buildPrompt = async (taskInstruction: string, soulPromptOverride?: string)
 
 export const buildRouterSystemPrompt = async (soulPrompt?: string): Promise<string> =>
   buildPrompt(
-    "你是客服路由器。只输出一个意图: visual_search/product_inquiry/order_status/general_chat/unknown。若 has_image=true 必须输出 visual_search。禁止输出其他内容。",
+    "你是客服路由器。只输出一个意图: visual_search/knowledge_query/product_inquiry/order_status/general_chat/unknown。若 has_media=true 必须输出 visual_search。knowledge_query 用于退换货政策、售后、保修、运费等规则类问题；product_inquiry 用于商品咨询、库存、价格、推荐。禁止输出其他内容。",
     soulPrompt
   );
 
