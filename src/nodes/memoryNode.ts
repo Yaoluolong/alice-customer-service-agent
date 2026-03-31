@@ -53,6 +53,7 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
   const openVikingClient = resolveOvClient(config);
   const { tenant_id, customer_id } = state;
   let ovSessionId = state.openviking_session_id;
+  let ovMessageCount = state.openviking_message_count ?? 0;
 
   // 1. Get or create OpenViking session
   if (!ovSessionId) {
@@ -64,13 +65,16 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
 
       if (active) {
         ovSessionId = active.session_id;
+        ovMessageCount = active.message_count ?? 0;
       } else {
         const created = await openVikingClient.createSession(tenant_id, customer_id);
         ovSessionId = created.session_id;
+        ovMessageCount = 0;
       }
     } catch (err) {
       // Non-fatal: continue without persistent session
       ovSessionId = `local_${Date.now()}`;
+      ovMessageCount = 0;
     }
   }
 
@@ -125,6 +129,7 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
 
   return {
     openviking_session_id: ovSessionId,
+    openviking_message_count: ovMessageCount,
     memory_context: memoryContext,
     conversation_summary: sessionSummaries[0] ?? state.conversation_summary,
     style_profile: existingStyle,
@@ -137,7 +142,10 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
   const { tenant_id, customer_id, openviking_session_id } = state;
 
   if (!openviking_session_id || openviking_session_id.startsWith("local_")) {
-    return { trace: ["memory:persist=skipped(no-session)"] };
+    return {
+      openviking_message_count: 0,
+      trace: ["memory:persist=skipped(no-session)"]
+    };
   }
 
   // Get last user message and last assistant message
@@ -155,6 +163,8 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
     if (lastUser && lastAssistant) break;
   }
 
+  let persistedMessages = 0;
+
   try {
     // Save user message
     if (lastUser) {
@@ -170,6 +180,7 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
       }
 
       await openVikingClient.addMessage(tenant_id, customer_id, openviking_session_id, "user", userParts);
+      persistedMessages += 1;
     }
 
     // Save assistant reply with ContextParts from grounding facts
@@ -198,6 +209,7 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
         "assistant",
         assistantParts
       );
+      persistedMessages += 1;
 
       // Report used contexts (non-blocking)
       if (usedUris.length > 0) {
@@ -209,20 +221,30 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
       }
     }
 
-    // Check if we should commit (non-blocking)
-    const totalMessages = state.memory_context?.shortTerm.recentMessages.length ?? 0;
-    const estimatedCount = totalMessages + 2; // +2 for the messages we just added
-    if (estimatedCount >= MESSAGE_COMMIT_THRESHOLD) {
+    const nextMessageCount = (state.openviking_message_count ?? 0) + persistedMessages;
+    if (nextMessageCount >= MESSAGE_COMMIT_THRESHOLD) {
       openVikingClient
         .commitSession(tenant_id, customer_id, openviking_session_id, false)
         .catch((err) => {
           logger.warn({ tenant_id, openviking_session_id, err: err.message }, "memory-persist commitSession failed");
         });
+
+      return {
+        openviking_session_id: null,
+        openviking_message_count: 0,
+        trace: [`memory:persist=ok,commit@${nextMessageCount}`]
+      };
     }
   } catch {
     // Non-fatal: persist failure doesn't break the response
-    return { trace: ["memory:persist=error"] };
+    return {
+      openviking_message_count: state.openviking_message_count ?? 0,
+      trace: ["memory:persist=error"]
+    };
   }
 
-  return { trace: [`memory:persist=ok`] };
+  return {
+    openviking_message_count: (state.openviking_message_count ?? 0) + persistedMessages,
+    trace: [`memory:persist=ok,+${persistedMessages}`]
+  };
 };

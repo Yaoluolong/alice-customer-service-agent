@@ -173,6 +173,76 @@ export class InMemorySessionStore implements SessionStore {
   }
 }
 
+class ResilientSessionStore implements SessionStore {
+  private readonly primary: RedisSessionStore;
+  private readonly fallback: InMemorySessionStore;
+  private degraded = false;
+
+  constructor(primary: RedisSessionStore, fallback: InMemorySessionStore = new InMemorySessionStore()) {
+    this.primary = primary;
+    this.fallback = fallback;
+  }
+
+  private async degrade(err: unknown, operation: string): Promise<void> {
+    if (!this.degraded) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn({ err: message, operation }, "session-store Redis unavailable, switching to in-memory mirror");
+      this.degraded = true;
+    }
+  }
+
+  async get(sessionId: string): Promise<AgentState | null> {
+    if (this.degraded) {
+      return this.fallback.get(sessionId);
+    }
+
+    try {
+      const state = await this.primary.get(sessionId);
+      if (state) {
+        await this.fallback.set(sessionId, state);
+        return state;
+      }
+      return this.fallback.get(sessionId);
+    } catch (err) {
+      await this.degrade(err, "get");
+      return this.fallback.get(sessionId);
+    }
+  }
+
+  async set(sessionId: string, state: AgentState): Promise<void> {
+    await this.fallback.set(sessionId, state);
+
+    if (this.degraded) {
+      return;
+    }
+
+    try {
+      await this.primary.set(sessionId, state);
+    } catch (err) {
+      await this.degrade(err, "set");
+    }
+  }
+
+  async merge(sessionId: string, patch: Partial<AgentState>): Promise<AgentState> {
+    if (this.degraded) {
+      return this.fallback.merge(sessionId, patch);
+    }
+
+    try {
+      const merged = await this.primary.merge(sessionId, patch);
+      await this.fallback.set(sessionId, merged);
+      return merged;
+    } catch (err) {
+      await this.degrade(err, "merge");
+      return this.fallback.merge(sessionId, patch);
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.primary.close();
+  }
+}
+
 // ── Factory ────────────────────────────────────────────────────────────────
 
 let _store: SessionStore | null = null;
@@ -192,13 +262,8 @@ export function createSessionStore(redisUrl?: string): SessionStore {
         logger.error({ err: err.message }, "session-store redis error");
       });
 
-      // Eagerly connect (non-blocking)
-      redis.connect().catch((err) => {
-        logger.warn({ err: err.message }, "session-store redis connect failed, falling back to in-memory");
-      });
-
-      _store = new RedisSessionStore(redis);
-      logger.info("session-store using Redis store");
+      _store = new ResilientSessionStore(new RedisSessionStore(redis));
+      logger.info("session-store using Redis store with in-memory fallback");
       return _store;
     } catch (err) {
       logger.warn({ err: (err as Error).message }, "session-store failed to create Redis store, falling back to in-memory");

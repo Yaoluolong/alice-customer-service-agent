@@ -30,6 +30,7 @@ export const AgentStateAnnotation = Annotation.Root({
   media_context: Annotation<AgentState["media_context"]>,
   memory_context: Annotation<AgentState["memory_context"]>,
   openviking_session_id: Annotation<string | null>,
+  openviking_message_count: Annotation<number>,
   retrieved_products: Annotation<AgentState["retrieved_products"]>,
   user_preferences: Annotation<AgentState["user_preferences"]>,
   requires_human: Annotation<boolean>,

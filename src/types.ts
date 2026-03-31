@@ -167,6 +167,7 @@ export interface AgentState {
   media_context: MediaContext | null;
   memory_context: MemoryContext | null;
   openviking_session_id: string | null;
+  openviking_message_count: number;
   retrieved_products: ProductInfo[];
   user_preferences: UserPreference[];
   requires_human: boolean;
@@ -241,6 +242,7 @@ export function createInitialState(params: {
     media_context: params.mediaContext ?? null,
     memory_context: null,
     openviking_session_id: null,
+    openviking_message_count: 0,
     retrieved_products: [],
     user_preferences: [],
     requires_human: false,
