@@ -2,6 +2,7 @@
   "name": "alice-ai-agent",
   "version": "1.0.0",
   "description": "多模态AI客服Agent系统 - 基于LangGraph.js",
+  "type": "commonjs",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

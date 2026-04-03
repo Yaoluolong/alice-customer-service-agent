@@ -61,7 +61,7 @@ export const buildComposerSystemPrompt = async (params: {
     `语气偏好：${params.userTone}；风格：${JSON.stringify(params.styleProfile)}。`,
     `开场建议：${params.openingHint}`,
     `收束建议：${params.closingHint}`,
-    `禁止词：${BANNED_MECHANICAL_PHRASES.join(" / ")}。`,
+    `严格禁止以下词句，违反将导致回复被拒绝：${BANNED_MECHANICAL_PHRASES.join(" / ")}。开场不得以"好问题""好的，我先""明白，我先""收到，我先"等机械引导语开头。`,
     languageHint,
     "直接输出给用户的最终回复，不要输出解释。"
   ].join("\n");
