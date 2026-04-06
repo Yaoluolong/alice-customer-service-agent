@@ -3,7 +3,7 @@ import axios from "axios";
 import Redis from "ioredis";
 import { logger } from "../logger";
 import { customerServiceAgentService } from "../service";
-import { QUEUE_NAMES, RequestJobData, ReplyJobData } from "./types";
+import { QUEUE_NAMES, RequestJobData, ReplyJobData, CoalesceJobData } from "./types";
 import { extractFirstFrame } from "../utils/video-frame";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -74,10 +74,30 @@ async function withSessionLock(sessionId: string, fn: () => Promise<void>): Prom
   }
 }
 
+// ── Coalesce buffer fetch ────────────────────────────────────────────────────
+
+const coalesceBufferKey = (agentId: string, customerId: string): string =>
+  `coalesce:msgs:${agentId}:${customerId}`;
+
+async function fetchAndClearCoalesceBuffer(agentId: string, customerId: string): Promise<RequestJobData[]> {
+  const redis = getLockRedis();
+  const key = coalesceBufferKey(agentId, customerId);
+  const raw = await redis.lrange(key, 0, -1);
+  if (raw.length > 0) await redis.del(key);
+  return raw.map((s) => JSON.parse(s) as RequestJobData);
+}
+
+function mergeCoalescedMessages(msgs: RequestJobData[]): Pick<RequestJobData, "text" | "media" | "agentConfig" | "userId"> {
+  const text = msgs.map((m) => m.text).filter(Boolean).join("\n");
+  // Use the last message's media (most recent attachment wins)
+  const media = [...msgs].reverse().find((m) => m.media)?.media;
+  return { text, media, agentConfig: msgs[0].agentConfig, userId: msgs[0].userId };
+}
+
 // ── Reply Queue ─────────────────────────────────────────────────────────────
 
 let replyQueue: Queue<ReplyJobData> | null = null;
-let requestWorker: Worker<RequestJobData> | null = null;
+let requestWorker: Worker<RequestJobData | CoalesceJobData> | null = null;
 
 export function getReplyQueue(): Queue<ReplyJobData> {
   if (!replyQueue) {
@@ -96,7 +116,7 @@ export function getReplyQueue(): Queue<ReplyJobData> {
 
 // ── Request Worker ──────────────────────────────────────────────────────────
 
-export function startRequestWorker(): Worker<RequestJobData> {
+export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
   if (requestWorker) return requestWorker;
 
   const workerOpts: ConstructorParameters<typeof Worker>[2] = {
@@ -111,13 +131,58 @@ export function startRequestWorker(): Worker<RequestJobData> {
     };
   }
 
-  requestWorker = new Worker<RequestJobData>(
+  requestWorker = new Worker<RequestJobData | CoalesceJobData>(
     QUEUE_NAMES.REQUESTS,
     async (job) => {
-      const { correlationId, tenantId, customerId, userId, sessionId, text, media, agentConfig } = job.data;
+      // ── Coalesce job: fetch buffered messages, merge, then process as chat ──
+      if (job.name === "coalesce") {
+        const { correlationId, agentId, tenantId, customerId, sessionId } = job.data as CoalesceJobData;
 
-      // Distributed session lock ensures sequential processing for same customer
-      const lockId = `${tenantId}:${customerId}`;
+        const msgs = await fetchAndClearCoalesceBuffer(agentId, customerId);
+        if (msgs.length === 0) {
+          logger.warn({ correlationId, agentId, customerId }, "coalesce job fired but buffer is empty — skipping");
+          return;
+        }
+
+        const { text, media, agentConfig, userId } = mergeCoalescedMessages(msgs);
+        const lockId = `${agentId}:${customerId}`;
+
+        await withSessionLock(lockId, async () => {
+          const result = await customerServiceAgentService.chat({
+            correlationId,
+            tenantId,
+            customerId,
+            userId,
+            sessionId,
+            text,
+            media,
+            tenantConfig: agentConfig as import("../types").TenantAgentConfig | undefined,
+          });
+
+          const isHandoff = !!result.handoffReason || result.route === "human_handoff";
+
+          await getReplyQueue().add("reply", {
+            correlationId,
+            agentId,
+            tenantId,
+            customerId,
+            reply: result.reply,
+            intent: result.intent,
+            confidence: result.confidence,
+            handoff: isHandoff,
+            handoffReason: result.handoffReason,
+          });
+        });
+
+        return;
+      }
+
+      // ── Regular chat job ─────────────────────────────────────────────────
+      const { correlationId, agentId, tenantId, customerId, userId, sessionId, text, media, agentConfig } = job.data as RequestJobData;
+
+      // Lock per agentId (not tenantId) so concurrent agents for the same tenant
+      // don't block each other when serving the same customer.
+      const lockId = `${agentId ?? tenantId}:${customerId}`;
 
       await withSessionLock(lockId, async () => {
         // Async media download: if media has URL but no base64, download now
@@ -170,6 +235,7 @@ export function startRequestWorker(): Worker<RequestJobData> {
 
         await getReplyQueue().add("reply", {
           correlationId,
+          agentId,
           tenantId,
           customerId,
           reply: result.reply,
