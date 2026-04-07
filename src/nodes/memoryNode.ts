@@ -100,6 +100,13 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
     ovMessageCount > 0 &&
     state.messages.length === 0;
 
+  if (isSessionRecovery) {
+    logger.warn(
+      { tenant_id, customer_id, ov_session_id: ovSessionId },
+      "memory-bootstrap: session recovery detected (Redis loss + existing OV session)"
+    );
+  }
+
   // 2. Load long-term memories via dual-query: contextual + baseline profile
   const userQuery = getLastUserText(state);
   const baselineQuery = "user profile preferences history milestone purchases";

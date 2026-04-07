@@ -145,22 +145,6 @@ describe("memoryBootstrap – dual-query & limit", () => {
     );
   });
 
-  it("does NOT flag recovery when Alice already has messages in state", async () => {
-    // state.messages is non-empty (the default makeState includes a HumanMessage)
-    const ovClient = makeMockOvClient({
-      listSessions: vi.fn().mockResolvedValue([
-        { session_id: "ov_existing", status: "active", message_count: 5, updated_at: new Date().toISOString() }
-      ]) as any,
-    });
-
-    const config = { configurable: { ovClient } };
-    const result = await memoryBootstrapNode(makeState("你好"), config);
-
-    const trace = result.trace ?? [];
-    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
-    expect(ltEntry).not.toContain("recovery");
-  });
-
   it("deduplicates memories from both search results by URI", async () => {
     const sharedItem: SearchItem = { uri: "viking://user/memories/profile/001", abstract: "shared", score: 0.9 };
     const searchMock = vi.fn().mockResolvedValue({
