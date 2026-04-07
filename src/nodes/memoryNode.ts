@@ -127,6 +127,7 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
             100
           );
           longTermItems = [...(fallback.memories ?? []), ...(fallback.resources ?? [])];
+          longTermItems.sort((a, b) => b.score - a.score);
         } catch {
           // Non-fatal
         }
