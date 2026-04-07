@@ -120,7 +120,7 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
 
   const memoryContext: MemoryContext = {
     shortTerm: { recentMessages, sessionSummaries },
-    longTerm: { profile, preferences, entities, events }
+    longTerm: { profile, preferences, entities, events, cases: [], patterns: [] }
   };
 
   // Extract style profile hint from long-term if available

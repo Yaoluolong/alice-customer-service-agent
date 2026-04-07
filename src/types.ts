@@ -120,6 +120,8 @@ export interface MemoryContext {
     preferences: SearchItem[];
     entities: SearchItem[];
     events: SearchItem[];
+    cases: SearchItem[];      // 具体事件/案例（purchases, issues）
+    patterns: SearchItem[];   // 行为模式（recurring behaviors）
   };
 }
 
