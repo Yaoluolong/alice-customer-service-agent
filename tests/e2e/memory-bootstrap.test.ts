@@ -163,6 +163,59 @@ describe("memoryBootstrap – dual-query & limit", () => {
     const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
     expect(ltEntry).toMatch(/lt:1$/); // deduped: only 1 unique item despite 2 calls
   });
+
+  // M-06: search 和 findMemories 均失败时记忆为空但对话继续
+  it("proceeds with empty memories when both search and findMemories fail", async () => {
+    const ovClient = makeMockOvClient({
+      search: vi.fn().mockRejectedValue(new Error("OV unavailable")) as any,
+      findMemories: vi.fn().mockRejectedValue(new Error("OV unavailable")) as any,
+    });
+    const config = { configurable: { ovClient } };
+    const result = await memoryBootstrapNode(makeState("你好"), config);
+
+    // Should not throw, returns state with empty long-term memories
+    expect(result.memory_context?.longTerm.profile).toBeNull();
+    expect(result.memory_context?.longTerm.preferences).toHaveLength(0);
+    // memoriesLoaded trace should show lt:0
+    const trace = result.trace ?? [];
+    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
+    expect(ltEntry).toMatch(/lt:0/);
+    // Session was still created (OV session API works, only search fails)
+    expect(result.openviking_session_id).toBeTruthy();
+  });
+
+  // M-07: 接近 100 条记忆时系统稳定
+  it("handles up to 100 memories without errors", async () => {
+    // 70 contextual + 30 baseline (no overlap) = 100 total
+    const makeItems = (prefix: string, count: number): SearchItem[] =>
+      Array.from({ length: count }, (_, i) => ({
+        uri: `viking://user/memories/${prefix}/${i}`,
+        abstract: `memory ${i}`,
+        score: Math.random(),
+      }));
+
+    let callCount = 0;
+    const ovClient = makeMockOvClient({
+      search: vi.fn().mockImplementation(() => {
+        callCount++;
+        // first call (contextual): 70 items; second call (baseline): 30 items
+        const items = callCount === 1
+          ? makeItems("contextual", 70)
+          : makeItems("baseline", 30);
+        return Promise.resolve({ memories: items, resources: [], skills: [], total: items.length });
+      }) as any,
+    });
+
+    const config = { configurable: { ovClient } };
+    const result = await memoryBootstrapNode(makeState("你好"), config);
+
+    // No throw, session created
+    expect(result.openviking_session_id).toBeTruthy();
+    // All 100 memories loaded (70 + 30 unique URIs)
+    const trace = result.trace ?? [];
+    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
+    expect(ltEntry).toMatch(/lt:100/);
+  });
 });
 
 describe("memoryBootstrap – session recovery detection", () => {
