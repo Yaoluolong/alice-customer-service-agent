@@ -94,6 +94,12 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
     }
   }
 
+  // 1b. Detect session recovery: Alice Redis was lost but OV still has an active session
+  const isSessionRecovery =
+    !state.openviking_session_id &&
+    ovMessageCount > 0 &&
+    state.messages.length === 0;
+
   // 2. Load long-term memories via dual-query: contextual + baseline profile
   const userQuery = getLastUserText(state);
   const baselineQuery = "user profile preferences history milestone purchases";
@@ -216,7 +222,11 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
     memory_context: memoryContext,
     conversation_summary: sessionSummaries[0] ?? state.conversation_summary,
     style_profile: existingStyle,
-    trace: [`memory:bootstrap=session:${ovSessionId},lt:${longTermItems.length}`]
+    trace: [
+      isSessionRecovery
+        ? `memory:bootstrap=recovery,session:${ovSessionId},lt:${longTermItems.length}`
+        : `memory:bootstrap=session:${ovSessionId},lt:${longTermItems.length}`
+    ]
   };
 };
 

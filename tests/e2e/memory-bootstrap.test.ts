@@ -145,6 +145,22 @@ describe("memoryBootstrap – dual-query & limit", () => {
     );
   });
 
+  it("does NOT flag recovery when Alice already has messages in state", async () => {
+    // state.messages is non-empty (the default makeState includes a HumanMessage)
+    const ovClient = makeMockOvClient({
+      listSessions: vi.fn().mockResolvedValue([
+        { session_id: "ov_existing", status: "active", message_count: 5, updated_at: new Date().toISOString() }
+      ]) as any,
+    });
+
+    const config = { configurable: { ovClient } };
+    const result = await memoryBootstrapNode(makeState("你好"), config);
+
+    const trace = result.trace ?? [];
+    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
+    expect(ltEntry).not.toContain("recovery");
+  });
+
   it("deduplicates memories from both search results by URI", async () => {
     const sharedItem: SearchItem = { uri: "viking://user/memories/profile/001", abstract: "shared", score: 0.9 };
     const searchMock = vi.fn().mockResolvedValue({
@@ -162,5 +178,92 @@ describe("memoryBootstrap – dual-query & limit", () => {
     const trace = result.trace ?? [];
     const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
     expect(ltEntry).toMatch(/lt:1$/); // deduped: only 1 unique item despite 2 calls
+  });
+});
+
+describe("memoryBootstrap – session recovery detection", () => {
+  const emptyResult = { memories: [], resources: [], skills: [], total: 0 };
+
+  /** State with no prior Alice session and empty message history — the recovery scenario. */
+  const makeRecoveryState = () => ({
+    tenant_id: "t1",
+    customer_id: "c1",
+    messages: [],
+    openviking_session_id: null,
+    openviking_message_count: 0,
+    memory_context: null,
+    conversation_summary: "",
+    style_profile: null,
+    intent: null,
+    route: null,
+    grounding_facts: null,
+    draft_reply: null,
+    final_reply: null,
+    product_id: null,
+    confidence: null,
+    review_flags: [],
+    handoff_reason: null,
+    trace: [],
+    media_context: null,
+  });
+
+  const makeMockOvClient = (overrides: Partial<OpenVikingHttpClient> = {}): OpenVikingHttpClient => {
+    const client = Object.create(OpenVikingHttpClient.prototype) as OpenVikingHttpClient;
+    client.listSessions = vi.fn().mockResolvedValue([]) as any;
+    client.createSession = vi.fn().mockResolvedValue({ session_id: "ov_recovery_001" }) as any;
+    client.search = vi.fn().mockResolvedValue(emptyResult) as any;
+    client.findMemories = vi.fn().mockResolvedValue(emptyResult) as any;
+    Object.assign(client, overrides);
+    return client;
+  };
+
+  it("detects session recovery when Alice has no history but OV has messages", async () => {
+    const ovClient = makeMockOvClient({
+      listSessions: vi.fn().mockResolvedValue([
+        { session_id: "ov_existing", status: "active", message_count: 10, updated_at: new Date().toISOString() }
+      ]) as any,
+    });
+
+    const config = { configurable: { ovClient } };
+    const result = await memoryBootstrapNode(makeRecoveryState(), config);
+
+    const trace = result.trace ?? [];
+    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
+    expect(ltEntry).toContain("recovery");
+    expect(ltEntry).toContain("ov_existing");
+  });
+
+  it("does NOT flag recovery when OV session has 0 messages", async () => {
+    const ovClient = makeMockOvClient({
+      listSessions: vi.fn().mockResolvedValue([
+        { session_id: "ov_empty", status: "active", message_count: 0, updated_at: new Date().toISOString() }
+      ]) as any,
+    });
+
+    const config = { configurable: { ovClient } };
+    const result = await memoryBootstrapNode(makeRecoveryState(), config);
+
+    const trace = result.trace ?? [];
+    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
+    expect(ltEntry).not.toContain("recovery");
+  });
+
+  it("does NOT flag recovery when Alice already has messages in state", async () => {
+    const stateWithMessages = {
+      ...makeRecoveryState(),
+      messages: [new HumanMessage("hello")],
+    };
+    const ovClient = makeMockOvClient({
+      listSessions: vi.fn().mockResolvedValue([
+        { session_id: "ov_existing", status: "active", message_count: 5, updated_at: new Date().toISOString() }
+      ]) as any,
+    });
+
+    const config = { configurable: { ovClient } };
+    const result = await memoryBootstrapNode(stateWithMessages, config);
+
+    const trace = result.trace ?? [];
+    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
+    expect(ltEntry).not.toContain("recovery");
   });
 });
