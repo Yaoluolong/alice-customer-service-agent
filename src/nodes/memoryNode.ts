@@ -94,29 +94,60 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
     }
   }
 
-  // 2. Load long-term memories via semantic search
-  const query = getLastUserText(state) || "user preferences profile history";
+  // 2. Load long-term memories via dual-query: contextual + baseline profile
+  const userQuery = getLastUserText(state);
+  const baselineQuery = "user profile preferences history milestone purchases";
+
+  const CONTEXTUAL_LIMIT = 70;
+  const BASELINE_LIMIT = 30;
+
   let longTermItems: SearchItem[] = [];
   try {
-    let memResult;
-    try {
-      memResult = await openVikingClient.search(
-        tenant_id, customer_id, query,
-        ovSessionId?.startsWith("local_") ? undefined : ovSessionId ?? undefined,
+    const ovSession = ovSessionId?.startsWith("local_") ? undefined : ovSessionId ?? undefined;
+
+    const [contextualResult, baselineResult] = await Promise.allSettled([
+      openVikingClient.search(
+        tenant_id, customer_id,
+        userQuery || baselineQuery,
+        ovSession,
         "viking://user/memories/",
-        15
-      );
-    } catch {
-      memResult = await openVikingClient.findMemories(
-        tenant_id, customer_id, query,
+        CONTEXTUAL_LIMIT
+      ),
+      openVikingClient.search(
+        tenant_id, customer_id,
+        baselineQuery,
+        ovSession,
         "viking://user/memories/",
-        15
+        BASELINE_LIMIT
+      ),
+    ]);
+
+    const seenUris = new Set<string>();
+    const collect = (result: PromiseSettledResult<Awaited<ReturnType<typeof openVikingClient.search>>>) => {
+      if (result.status !== "fulfilled") return;
+      for (const item of [...(result.value.memories ?? []), ...(result.value.resources ?? [])]) {
+        if (!seenUris.has(item.uri)) {
+          seenUris.add(item.uri);
+          longTermItems.push(item);
+        }
+      }
+    };
+
+    collect(contextualResult);
+    collect(baselineResult);
+
+    // Both failed — fall back to findMemories
+    if (longTermItems.length === 0 && contextualResult.status === "rejected" && baselineResult.status === "rejected") {
+      const fallback = await openVikingClient.findMemories(
+        tenant_id, customer_id,
+        userQuery || baselineQuery,
+        "viking://user/memories/",
+        100
       );
+      longTermItems = [...(fallback.memories ?? []), ...(fallback.resources ?? [])];
     }
-    longTermItems = [
-      ...(memResult.memories ?? []),
-      ...(memResult.resources ?? [])
-    ].sort((a, b) => b.score - a.score);
+
+    longTermItems.sort((a, b) => b.score - a.score);
   } catch {
     // Non-fatal: proceed without long-term memories
   }
