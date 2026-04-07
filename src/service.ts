@@ -15,7 +15,9 @@ const countMemories = (ctx: MemoryContext | null): number => {
     (ctx.longTerm.profile ? 1 : 0) +
     ctx.longTerm.preferences.length +
     ctx.longTerm.entities.length +
-    ctx.longTerm.events.length
+    ctx.longTerm.events.length +
+    ctx.longTerm.cases.length +
+    ctx.longTerm.patterns.length
   );
 };
 

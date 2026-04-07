@@ -22,31 +22,47 @@ const buildConversationSummary = (messages: Array<{ role: string; content: strin
     .map((m) => `${m.role}: ${m.content.slice(0, 120)}`)
     .join("\n");
 
-const categoriseMemories = (
+export const categoriseMemories = (
   items: SearchItem[]
-): Pick<MemoryContext["longTerm"], "profile" | "preferences" | "entities" | "events"> => {
+): Pick<MemoryContext["longTerm"], "profile" | "preferences" | "entities" | "events" | "cases" | "patterns"> => {
   let profile: string | null = null;
   const preferences: SearchItem[] = [];
   const entities: SearchItem[] = [];
   const events: SearchItem[] = [];
+  const cases: SearchItem[] = [];
+  const patterns: SearchItem[] = [];
 
   for (const item of items) {
     const uriLower = item.uri.toLowerCase();
     const absLower = (item.abstract ?? "").toLowerCase();
+
     if (uriLower.includes("profile") || absLower.includes("profile")) {
-      if (!profile) profile = item.abstract;
+      if (!profile) profile = item.abstract || item.uri;
+    } else if (uriLower.includes("pattern")) {
+      patterns.push(item);
+    } else if (uriLower.includes("case")) {
+      cases.push(item);
     } else if (uriLower.includes("preference") || absLower.includes("prefer")) {
       preferences.push(item);
-    } else if (uriLower.includes("entit") || absLower.includes("product") || absLower.includes("brand")) {
+    } else if (
+      uriLower.includes("entit") ||
+      absLower.includes("product") ||
+      absLower.includes("brand")
+    ) {
       entities.push(item);
-    } else if (uriLower.includes("event") || uriLower.includes("purchase") || uriLower.includes("order")) {
+    } else if (
+      uriLower.includes("event") ||
+      uriLower.includes("purchase") ||
+      uriLower.includes("order") ||
+      uriLower.includes("milestone")
+    ) {
       events.push(item);
     } else {
       preferences.push(item);
     }
   }
 
-  return { profile, preferences, entities, events };
+  return { profile, preferences, entities, events, cases, patterns };
 };
 
 export const memoryBootstrapNode = async (state: AgentState, config?: RunnableConfig): Promise<Partial<AgentState>> => {
@@ -105,7 +121,7 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
     // Non-fatal: proceed without long-term memories
   }
 
-  const { profile, preferences, entities, events } = categoriseMemories(longTermItems);
+  const { profile, preferences, entities, events, cases, patterns } = categoriseMemories(longTermItems);
 
   // 3. Build short-term from existing messages in state
   const recentMessages = state.messages
@@ -120,7 +136,7 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
 
   const memoryContext: MemoryContext = {
     shortTerm: { recentMessages, sessionSummaries },
-    longTerm: { profile, preferences, entities, events, cases: [], patterns: [] }
+    longTerm: { profile, preferences, entities, events, cases, patterns }
   };
 
   // Extract style profile hint from long-term if available
