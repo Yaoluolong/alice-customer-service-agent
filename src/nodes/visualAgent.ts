@@ -96,7 +96,7 @@ export const visualAgentNode = async (state: AgentState, config?: RunnableConfig
       state.tenant_id,
       state.customer_id,
       searchQuery,
-      state.openviking_session_id ?? undefined,
+      state.openviking_session_id?.startsWith("local_") ? undefined : state.openviking_session_id ?? undefined,
       "viking://resources/products/",
       5
     );

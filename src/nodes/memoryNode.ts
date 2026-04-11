@@ -35,26 +35,22 @@ export const categoriseMemories = (
   for (const item of items) {
     const uriLower = item.uri.toLowerCase();
     const absLower = (item.abstract ?? "").toLowerCase();
-
-    if (uriLower.includes("profile") || absLower.includes("profile")) {
+    if (uriLower.includes("/profile/") || absLower.includes("profile")) {
       if (!profile) profile = item.abstract || item.uri;
-    } else if (uriLower.includes("pattern")) {
+    } else if (uriLower.includes("/patterns/")) {
       patterns.push(item);
-    } else if (uriLower.includes("case")) {
+    } else if (uriLower.includes("/cases/")) {
       cases.push(item);
-    } else if (uriLower.includes("preference") || absLower.includes("prefer")) {
+    } else if (uriLower.includes("/preference/") || absLower.includes("prefer")) {
       preferences.push(item);
     } else if (
-      uriLower.includes("entit") ||
-      absLower.includes("product") ||
-      absLower.includes("brand")
+      uriLower.includes("/entities/") || uriLower.includes("/entity/") ||
+      absLower.includes("product") || absLower.includes("brand")
     ) {
       entities.push(item);
     } else if (
-      uriLower.includes("event") ||
-      uriLower.includes("purchase") ||
-      uriLower.includes("order") ||
-      uriLower.includes("milestone")
+      uriLower.includes("/event/") || uriLower.includes("/purchase/") ||
+      uriLower.includes("/order/") || uriLower.includes("/milestone/")
     ) {
       events.push(item);
     } else {
