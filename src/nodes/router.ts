@@ -43,14 +43,15 @@ const classifyIntent = async (
   hasMedia: boolean,
   mediaType?: string,
   keywordOverrides?: Record<string, string[]>,
-  soulPrompt?: string
+  soulPrompt?: string,
+  language?: string
 ): Promise<UserIntent> => {
   const llm = getConfiguredModel("aux", 0);
   if (!llm) return heuristicClassify(text, hasMedia, keywordOverrides);
 
   try {
     const response = await llm.invoke([
-      new SystemMessage(await buildRouterSystemPrompt(soulPrompt)),
+      new SystemMessage(await buildRouterSystemPrompt(soulPrompt, language)),
       new HumanMessage(`has_media=${hasMedia}; media_type=${mediaType ?? "none"}; text=${text}`)
     ]);
     const normalized = String(response.content).trim().toLowerCase();
@@ -106,7 +107,8 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
     hasMedia,
     mediaType,
     tenantConfig?.routerKeywords,
-    tenantConfig?.soulPrompt
+    tenantConfig?.soulPrompt,
+    tenantConfig?.defaultLanguage ?? state.reply_language
   );
   const target = resolveTarget(intent, hasMedia, tenantConfig);
 
