@@ -35,6 +35,8 @@ export interface SearchResult {
   total: number;
 }
 
+const VALID_CUSTOMER_ID = /^[a-zA-Z0-9_-]+$/;
+
 export class OpenVikingHttpClient {
   private readonly http: AxiosInstance;
   private readonly breaker: ReturnType<typeof circuitBreaker>;
@@ -62,6 +64,13 @@ export class OpenVikingHttpClient {
     });
   }
 
+  /** Throws before breaker.execute to avoid poisoning the circuit breaker with client-side validation errors. */
+  private assertValidCustomerId(customerId: string): void {
+    if (!VALID_CUSTOMER_ID.test(customerId)) {
+      throw new Error(`invalid customerId for OpenViking: "${customerId}"`);
+    }
+  }
+
   private headers(tenantId: string, customerId: string): Record<string, string> {
     return {
       "X-OpenViking-Account": tenantId,
@@ -71,6 +80,7 @@ export class OpenVikingHttpClient {
   }
 
   async createSession(tenantId: string, customerId: string): Promise<{ session_id: string }> {
+    this.assertValidCustomerId(customerId);
     const res = await this.breaker.execute(() =>
       this.http.post("/api/v1/sessions", {}, { headers: this.headers(tenantId, customerId) })
     );
@@ -78,6 +88,7 @@ export class OpenVikingHttpClient {
   }
 
   async listSessions(tenantId: string, customerId: string): Promise<SessionInfo[]> {
+    this.assertValidCustomerId(customerId);
     const res = await this.breaker.execute(() =>
       this.http.get("/api/v1/sessions", { headers: this.headers(tenantId, customerId) })
     );
@@ -94,6 +105,7 @@ export class OpenVikingHttpClient {
     role: "user" | "assistant",
     parts: MessagePart[]
   ): Promise<void> {
+    this.assertValidCustomerId(customerId);
     await this.breaker.execute(() =>
       this.http.post(
         `/api/v1/sessions/${sessionId}/messages`,
@@ -109,6 +121,7 @@ export class OpenVikingHttpClient {
     sessionId: string,
     wait = false
   ): Promise<void> {
+    this.assertValidCustomerId(customerId);
     await this.breaker.execute(() =>
       this.http.post(
         `/api/v1/sessions/${sessionId}/commit`,
@@ -125,6 +138,7 @@ export class OpenVikingHttpClient {
     targetUri?: string,
     limit = 10
   ): Promise<SearchResult> {
+    this.assertValidCustomerId(customerId);
     const res = await this.breaker.execute(() =>
       this.http.post(
         "/api/v1/search/find",
@@ -159,6 +173,7 @@ export class OpenVikingHttpClient {
     targetUri = "",
     limit = 5
   ): Promise<SearchResult> {
+    this.assertValidCustomerId(customerId);
     const res = await this.breaker.execute(() =>
       this.http.post(
         "/api/v1/search/search",
@@ -171,6 +186,7 @@ export class OpenVikingHttpClient {
 
   /** Get L1 overview (~2k tokens) for a viking:// URI */
   async getOverview(tenantId: string, customerId: string, uri: string): Promise<string> {
+    this.assertValidCustomerId(customerId);
     const res = await this.breaker.execute(() =>
       this.http.get("/api/v1/content/overview", {
         params: { uri },
@@ -182,6 +198,7 @@ export class OpenVikingHttpClient {
 
   /** Get L2 full detail for a viking:// URI */
   async readDetail(tenantId: string, customerId: string, uri: string): Promise<string> {
+    this.assertValidCustomerId(customerId);
     const res = await this.breaker.execute(() =>
       this.http.get("/api/v1/content/read", {
         params: { uri },
@@ -198,6 +215,7 @@ export class OpenVikingHttpClient {
     contextUris: string[]
   ): Promise<void> {
     if (contextUris.length === 0) return;
+    this.assertValidCustomerId(customerId);
     await this.breaker.execute(() =>
       this.http.post(
         `/api/v1/sessions/${sessionId}/used`,
