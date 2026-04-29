@@ -38,3 +38,9 @@ export const imageContextInput = (): ChatRequest =>
       description: "A red coat"
     }
   });
+
+export const audioInput = (): ChatRequest =>
+  makeChatInput({
+    text: "红色风衣有M码吗",
+    // No media context — audio is transcribed to text by the worker before reaching the service
+  });

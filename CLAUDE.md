@@ -83,11 +83,12 @@ memoryBootstrap → router → [visual|sales|order|chat|knowledge]Agent → resp
 `src/queues/worker.ts` 处理流程：
 1. 从 `alice-requests` 队列消费
 2. 获取分布式会话锁
-3. **异步下载媒体**（如有 URL 无 base64）
-4. **视频首帧提取**（mediaType=video 时，调 ffmpeg 提取首帧，mimeType 转为 image/jpeg）
-5. 调用 `customerServiceAgentService.chat()`
-6. 将结果入队 `alice-replies`
-7. 释放会话锁
+3. **媒体 fallback 下载**（如有 URL 无 base64，Gateway 通常已下载）
+4. **音频 STT 转写**（mediaType=audio 时，调 Whisper API 转文字，清除 media_context，按文本路由）
+5. **视频首帧提取**（mediaType=video 时，调 ffmpeg 提取首帧，mimeType 转为 image/jpeg）
+6. 调用 `customerServiceAgentService.chat()`
+7. 将结果入队 `alice-replies`
+8. 释放会话锁
 
 队列类型从 `@opencommerce/shared-types` 导入。Payload 包含 `correlationId`，不含 `channelConfig`。
 
@@ -212,6 +213,6 @@ Domain agents 在创建 fact 时填充 `sourceUri`（来自搜索结果的 `item
 |------|----------|
 | `health.test.ts` | `/health`、404、错误处理 |
 | `chat-routing.test.ts` | 意图分类 → 路由（闲聊、商品、订单、图搜、转人工） |
-| `chat-media.test.ts` | 媒体消息 → visual_agent |
+| `chat-media.test.ts` | 媒体消息 → visual_agent；音频转写后按文本路由 |
 | `confidence.test.ts` | 置信度阈值 + handoff |
 | `session-lifecycle.test.ts` | 会话创建、续接、查询 |

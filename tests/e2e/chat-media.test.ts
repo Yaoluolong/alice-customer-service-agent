@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { startTestServer, type TestServer } from "./helpers/server-factory";
 import { postChat } from "./helpers/chat-client";
 import { mockOpenVikingAll, cleanNock } from "./helpers/nock-openviking";
-import { mediaInput, imageContextInput } from "./helpers/fixtures";
+import { mediaInput, imageContextInput, audioInput } from "./helpers/fixtures";
 
 describe("Media message routing", () => {
   let srv: TestServer;
@@ -36,5 +36,14 @@ describe("Media message routing", () => {
     expect(status).toBe(200);
     expect(data.route).toBe("visual_agent");
     expect(data.trace.some((t: string) => t.startsWith("visual:"))).toBe(true);
+  });
+
+  it("transcribed audio (text only, no media) routes by text content, not visual_agent", async () => {
+    // After STT in worker, audio becomes a text-only message — should route to sales_agent
+    const { status, data } = await postChat(srv.baseUrl, audioInput());
+    expect(status).toBe(200);
+    expect(data.route).not.toBe("visual_agent");
+    // "红色风衣有M码吗" should match product_inquiry keywords → sales_agent
+    expect(data.route).toBe("sales_agent");
   });
 });

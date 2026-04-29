@@ -1,7 +1,9 @@
 import { Worker, Queue } from "bullmq";
 import axios from "axios";
+import FormData from "form-data";
 import Redis from "ioredis";
 import { logger } from "../logger";
+import { appConfig } from "../config/env";
 import { customerServiceAgentService } from "../service";
 import { QUEUE_NAMES, RequestJobData, ReplyJobData, CoalesceJobData } from "./types";
 import { extractFirstFrame } from "../utils/video-frame";
@@ -204,6 +206,37 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
           }
         }
 
+        // Audio STT: transcribe voice messages to text, then process as text message
+        let resolvedText = text;
+        if (resolvedMedia?.mediaType === "audio" && resolvedMedia.base64Data) {
+          try {
+            const audioBuffer = Buffer.from(resolvedMedia.base64Data, "base64");
+            const ext = resolvedMedia.mimeType.includes("ogg") ? "ogg" : resolvedMedia.mimeType.includes("mp4") ? "m4a" : "mp3";
+            const form = new FormData();
+            form.append("file", audioBuffer, { filename: `audio.${ext}`, contentType: resolvedMedia.mimeType });
+            form.append("model", "whisper-1");
+
+            const sttBaseUrl = (appConfig.openai.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
+            const sttRes = await axios.post(`${sttBaseUrl}/audio/transcriptions`, form, {
+              headers: {
+                ...form.getHeaders(),
+                Authorization: `Bearer ${appConfig.openai.apiKey}`,
+              },
+              timeout: 30000,
+            });
+            const transcript = (sttRes.data as { text: string }).text?.trim();
+            if (transcript) {
+              resolvedText = resolvedText === "[media]" ? transcript : `${resolvedText} ${transcript}`;
+              resolvedMedia = undefined; // audio converted to text, no media for graph
+              logger.info({ correlationId }, "audio transcribed via STT");
+            }
+          } catch (err) {
+            logger.warn({ correlationId, err: (err as Error).message }, "audio STT failed");
+            resolvedText = resolvedText === "[media]" ? "[voice message]" : resolvedText;
+            resolvedMedia = undefined;
+          }
+        }
+
         // Extract first frame from video so VLM receives an image, not raw video bytes
         if (resolvedMedia?.mediaType === "video" && resolvedMedia.base64Data) {
           try {
@@ -226,7 +259,7 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
           customerId,
           userId,
           sessionId,
-          text,
+          text: resolvedText,
           media: resolvedMedia,
           tenantConfig: agentConfig as import("../types").TenantAgentConfig | undefined,
         });

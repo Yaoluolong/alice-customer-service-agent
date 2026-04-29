@@ -91,7 +91,7 @@ export interface ImageContext {
   description?: string;
 }
 
-export type MediaType = "image" | "video";
+export type MediaType = "image" | "video" | "audio";
 
 export interface MediaContext {
   mediaId: string;
