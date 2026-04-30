@@ -147,6 +147,12 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
         }
 
         const { text, media, agentConfig, userId } = mergeCoalescedMessages(msgs);
+
+        if (!correlationId) {
+          logger.warn({ jobId: job.id, tenantId, customerId }, "[alice-worker] correlationId missing in coalesce path — skipping");
+          return;
+        }
+
         const lockId = `${agentId}:${customerId}`;
 
         await withSessionLock(lockId, async () => {
@@ -162,11 +168,6 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
           });
 
           const isHandoff = !!result.handoffReason || result.route === "human_handoff";
-
-          if (!correlationId) {
-            logger.warn({ jobId: job.id, tenantId, customerId }, "[alice-worker] correlationId missing in coalesce path — skipping enqueue");
-            return;
-          }
 
           await getReplyQueue().add("reply", {
             correlationId,
