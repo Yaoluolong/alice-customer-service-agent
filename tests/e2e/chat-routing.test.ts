@@ -60,11 +60,12 @@ describe("Chat routing (heuristic, no LLM)", () => {
     expect(data.trace.some((t: string) => t.startsWith("visual:"))).toBe(true);
   });
 
-  it("unclassifiable text routes to human_handoff", async () => {
+  it("unclassifiable text routes to chat_agent (not human_handoff)", async () => {
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({ text: "xyzzy_completely_unknown_intent_zxcvb" }));
     expect(status).toBe(200);
-    // UNKNOWN intent → HUMAN_HANDOFF
-    expect(["human_handoff", "sales_agent"]).toContain(data.route);
+    // UNKNOWN intent must fall back to chatAgent, never directly to human_handoff at router level
+    expect(data.route).toBe("chat_agent");
+    expect(data.intent).toBe("unknown");
   });
 
   it("all responses include non-empty trace array", async () => {
