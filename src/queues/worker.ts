@@ -163,6 +163,11 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
 
           const isHandoff = !!result.handoffReason || result.route === "human_handoff";
 
+          if (!correlationId) {
+            logger.warn({ jobId: job.id, tenantId, customerId }, "[alice-worker] correlationId missing in coalesce path — skipping enqueue");
+            return;
+          }
+
           await getReplyQueue().add("reply", {
             correlationId,
             agentId,
@@ -181,6 +186,11 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
 
       // ── Regular chat job ─────────────────────────────────────────────────
       const { correlationId, agentId, tenantId, customerId, userId, sessionId, text, media, agentConfig } = job.data as RequestJobData;
+
+      if (!correlationId) {
+        logger.warn({ jobId: job.id, tenantId, customerId }, "[alice-worker] correlationId missing from job data — skipping job");
+        return;
+      }
 
       // Lock per agentId (not tenantId) so concurrent agents for the same tenant
       // don't block each other when serving the same customer.
