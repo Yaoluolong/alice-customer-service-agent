@@ -12,8 +12,9 @@ COPY tests/package.json ./tests/package.json
 RUN npm ci --ignore-scripts
 # Build shared-types first (Alice runtime depends on compiled JS)
 RUN npm run build --workspace=packages/shared-types
-# Copy full Alice source and build
-COPY Alice/ ./Alice/
+# Fetch Alice source from GitHub (Alice is a git submodule; railway up does not upload submodule contents)
+RUN apk add --no-cache git && \
+    git clone --depth=1 https://github.com/Yaoluolong/alice-customer-service-agent.git Alice
 RUN npm run build --workspace=Alice
 
 FROM node:20-alpine
