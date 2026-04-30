@@ -84,7 +84,7 @@ const resolveTarget = (
   } else if (intent === UserIntent.PRODUCT_INQUIRY) {
     target = RouteTarget.SALES_AGENT;
   } else {
-    return RouteTarget.HUMAN_HANDOFF; // UNKNOWN always reaches human handoff
+    return RouteTarget.CHAT_AGENT; // UNKNOWN → chatAgent as graceful fallback
   }
 
   // Enforce enabledAgents: if this agent is disabled by the tenant, fallback to chat_agent.
