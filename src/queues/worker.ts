@@ -188,7 +188,7 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
       }
 
       // ── Regular chat job ─────────────────────────────────────────────────
-      const { correlationId, agentId, tenantId, customerId, userId, sessionId, text, media, agentConfig } = job.data as RequestJobData;
+      const { correlationId, agentId, tenantId, customerId, userId, sessionId, text, media, agentConfig, playground } = job.data as RequestJobData;
 
       const effectiveCorrelationId = correlationId || (() => {
         const fallback = randomUUID();
@@ -290,6 +290,7 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
           confidence: result.confidence,
           handoff: isHandoff,
           handoffReason: result.handoffReason,
+          playground: playground ?? false,
         });
       });
     },
