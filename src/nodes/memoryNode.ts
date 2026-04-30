@@ -49,7 +49,8 @@ export const categoriseMemories = (
     ) {
       entities.push(item);
     } else if (
-      uriLower.includes("/event/") || uriLower.includes("/purchase/") ||
+      uriLower.includes("/events/") || uriLower.includes("/event/") ||
+      uriLower.includes("/purchase/") ||
       uriLower.includes("/order/") || uriLower.includes("/milestone/")
     ) {
       events.push(item);
@@ -90,11 +91,14 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
     }
   }
 
-  // 1b. Detect session recovery: Alice Redis was lost but OV still has an active session
+  // 1b. Detect session recovery: Alice Redis was lost but OV still has an active session.
+  // In HTTP flow, state.messages always contains at least the current user message (length >= 1).
+  // Recovery is when Alice has no prior history (≤ 1 message = only current message) but OV
+  // already has accumulated messages from a previous session.
   const isSessionRecovery =
     !state.openviking_session_id &&
     ovMessageCount > 0 &&
-    state.messages.length === 0;
+    state.messages.length <= 1;
 
   if (isSessionRecovery) {
     logger.warn(

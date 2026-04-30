@@ -291,9 +291,10 @@ describe("memoryBootstrap – session recovery detection", () => {
   });
 
   it("does NOT flag recovery when Alice already has messages in state", async () => {
+    // Simulate a continuing conversation: prior user turn + current message (length > 1)
     const stateWithMessages = {
       ...makeRecoveryState(),
-      messages: [new HumanMessage("hello")],
+      messages: [new HumanMessage("prior message"), new HumanMessage("hello")],
     };
     const ovClient = makeMockOvClient({
       listSessions: vi.fn().mockResolvedValue([
@@ -788,6 +789,9 @@ describe("Memory Persist — Message Persistence (P-01, P-05, P-06, P-07)", () =
   it("P-07: local_ session skips all OV persist calls", async () => {
     nock(OV_BASE).get("/api/v1/sessions").reply(500, { status: "error" }).persist();
     nock(OV_BASE).post("/api/v1/sessions").reply(500, { status: "error" }).persist();
+    // Mock search/find so the circuit breaker does not trip from DNS failures
+    nock(OV_BASE).post("/api/v1/search/search").reply(200, makeSearchResult([])).persist();
+    nock(OV_BASE).post("/api/v1/search/find").reply(200, makeSearchResult([])).persist();
 
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({ text: "你好" }));
     expect(status).toBe(200);
@@ -848,34 +852,39 @@ describe("Session Recovery Detection (R-01, R-02, R-03)", () => {
   });
 
   // R-03: Normal continuation → NOT recovery
+  // To properly test this we need Alice's session store to have an existing session
+  // (with openviking_session_id already set). We do that by making a first chat call
+  // that establishes the session, then a second call that continues it.
   it("R-03: normal session continuation → recovery NOT triggered", async () => {
-    const existingSessionId = "ov_sess_normal_001";
+    const aliceSessionId = "r03_alice_session";
+    const ovSessionId = "ov_sess_normal_001";
 
-    nock(OV_BASE)
-      .get("/api/v1/sessions")
-      .reply(200, {
-        status: "ok",
-        result: {
-          sessions: [{
-            session_id: existingSessionId,
-            status: "active",
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            message_count: 3
-          }]
-        }
-      })
-      .persist();
+    // First call: establish the Alice session + OV session
+    nock(OV_BASE).get("/api/v1/sessions").reply(200, { status: "ok", result: { sessions: [] } }).persist();
+    nock(OV_BASE).post("/api/v1/sessions").reply(200, { status: "ok", result: { session_id: ovSessionId } }).persist();
     nock(OV_BASE).post("/api/v1/search/search").reply(200, makeSearchResult([])).persist();
     nock(OV_BASE).post(/\/api\/v1\/sessions\/.*\/messages/).reply(200, { status: "ok", result: { ok: true } }).persist();
 
-    // Pass the existing sessionId → normal continuation
+    const first = await postChat(srv.baseUrl, makeChatInput({
+      sessionId: aliceSessionId,
+      text: "你好"
+    }));
+    expect(first.status).toBe(200);
+    expect(first.data.openVikingSessionId).toBe(ovSessionId);
+
+    // Clean up and re-setup nocks for second call
+    cleanNock();
+    // Second call: Alice session store has the prior state (openviking_session_id is set)
+    // so memoryBootstrapNode skips listSessions → normal continuation, NOT recovery
+    nock(OV_BASE).post("/api/v1/search/search").reply(200, makeSearchResult([])).persist();
+    nock(OV_BASE).post(/\/api\/v1\/sessions\/.*\/messages/).reply(200, { status: "ok", result: { ok: true } }).persist();
+
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({
-      sessionId: "existing_alice_session_001",
+      sessionId: aliceSessionId,
       text: "继续"
     }));
     expect(status).toBe(200);
-    expect(data.openVikingSessionId).toBe(existingSessionId);
+    expect(data.openVikingSessionId).toBe(ovSessionId);
     expect(data.trace.some((t: string) => t.includes("recovery"))).toBe(false);
   });
 });
