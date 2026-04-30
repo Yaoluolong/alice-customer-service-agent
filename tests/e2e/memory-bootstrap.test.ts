@@ -1,8 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import nock from "nock";
 import { categoriseMemories, memoryBootstrapNode } from "../../src/nodes/memoryNode";
 import type { SearchItem } from "../../src/types";
 import { HumanMessage } from "@langchain/core/messages";
 import { OpenVikingHttpClient } from "../../src/clients/openviking-client";
+import { startTestServer, type TestServer } from "./helpers/server-factory";
+import { postChat, type ChatResponse } from "./helpers/chat-client";
+import { cleanNock } from "./helpers/nock-openviking";
+import { makeChatInput } from "./helpers/fixtures";
 
 function item(uri: string, abstract = ""): SearchItem {
   return { uri, abstract, score: 0.9 };
@@ -302,6 +307,9 @@ describe("memoryBootstrap – session recovery detection", () => {
     const trace = result.trace ?? [];
     const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
     expect(ltEntry).not.toContain("recovery");
+  });
+});
+
 /**
  * Memory Bootstrap E2E Tests
  *
@@ -314,13 +322,6 @@ describe("memoryBootstrap – session recovery detection", () => {
  * Run: cd Alice && npm run test:e2e
  * Or:  cd Alice && npx vitest run tests/e2e/memory-bootstrap.test.ts --config tests/e2e/vitest.config.ts
  */
-
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import nock from "nock";
-import { startTestServer, type TestServer } from "./helpers/server-factory";
-import { postChat, type ChatResponse } from "./helpers/chat-client";
-import { cleanNock } from "./helpers/nock-openviking";
-import { makeChatInput } from "./helpers/fixtures";
 
 const OV_BASE = "http://openviking-mock.test";
 
