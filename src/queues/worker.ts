@@ -1,4 +1,5 @@
 import { Worker, Queue } from "bullmq";
+import { randomUUID } from "crypto";
 import axios from "axios";
 import FormData from "form-data";
 import Redis from "ioredis";
@@ -148,16 +149,17 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
 
         const { text, media, agentConfig, userId } = mergeCoalescedMessages(msgs);
 
-        if (!correlationId) {
-          logger.warn({ jobId: job.id, tenantId, customerId }, "[alice-worker] correlationId missing in coalesce path — skipping");
-          return;
-        }
+        const effectiveCorrelationId = correlationId || (() => {
+          const fallback = randomUUID();
+          logger.warn({ jobId: job.id, tenantId, customerId, fallbackCorrelationId: fallback }, "[alice-worker] correlationId missing in coalesce path — using fallback UUID");
+          return fallback;
+        })();
 
         const lockId = `${agentId}:${customerId}`;
 
         await withSessionLock(lockId, async () => {
           const result = await customerServiceAgentService.chat({
-            correlationId,
+            correlationId: effectiveCorrelationId,
             tenantId,
             customerId,
             userId,
@@ -170,7 +172,7 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
           const isHandoff = !!result.handoffReason || result.route === "human_handoff";
 
           await getReplyQueue().add("reply", {
-            correlationId,
+            correlationId: effectiveCorrelationId,
             agentId,
             tenantId,
             customerId,
@@ -188,10 +190,11 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
       // ── Regular chat job ─────────────────────────────────────────────────
       const { correlationId, agentId, tenantId, customerId, userId, sessionId, text, media, agentConfig } = job.data as RequestJobData;
 
-      if (!correlationId) {
-        logger.warn({ jobId: job.id, tenantId, customerId }, "[alice-worker] correlationId missing from job data — skipping job");
-        return;
-      }
+      const effectiveCorrelationId = correlationId || (() => {
+        const fallback = randomUUID();
+        logger.warn({ jobId: job.id, tenantId, customerId, fallbackCorrelationId: fallback }, "[alice-worker] correlationId missing from job data — using fallback UUID");
+        return fallback;
+      })();
 
       // Lock per agentId (not tenantId) so concurrent agents for the same tenant
       // don't block each other when serving the same customer.
@@ -213,7 +216,7 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
               mimeType: contentType.split(";")[0],
             };
           } catch (err) {
-            logger.warn({ correlationId, err: (err as Error).message }, "media download failed, proceeding without base64");
+            logger.warn({ correlationId: effectiveCorrelationId, err: (err as Error).message }, "media download failed, proceeding without base64");
           }
         }
 
@@ -239,10 +242,10 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
             if (transcript) {
               resolvedText = resolvedText === "[media]" ? transcript : `${resolvedText} ${transcript}`;
               resolvedMedia = undefined; // audio converted to text, no media for graph
-              logger.info({ correlationId }, "audio transcribed via STT");
+              logger.info({ correlationId: effectiveCorrelationId }, "audio transcribed via STT");
             }
           } catch (err) {
-            logger.warn({ correlationId, err: (err as Error).message }, "audio STT failed");
+            logger.warn({ correlationId: effectiveCorrelationId, err: (err as Error).message }, "audio STT failed");
             resolvedText = resolvedText === "[media]" ? "[voice message]" : resolvedText;
             resolvedMedia = undefined;
           }
@@ -260,12 +263,12 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
               // Keep mediaType: "video" so downstream nodes know the original type
             };
           } catch (err) {
-            logger.warn({ correlationId, err: (err as Error).message }, "video frame extraction failed, proceeding with raw video data");
+            logger.warn({ correlationId: effectiveCorrelationId, err: (err as Error).message }, "video frame extraction failed, proceeding with raw video data");
           }
         }
 
         const result = await customerServiceAgentService.chat({
-          correlationId,
+          correlationId: effectiveCorrelationId,
           tenantId,
           customerId,
           userId,
@@ -278,7 +281,7 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
         const isHandoff = !!result.handoffReason || result.route === "human_handoff";
 
         await getReplyQueue().add("reply", {
-          correlationId,
+          correlationId: effectiveCorrelationId,
           agentId,
           tenantId,
           customerId,
