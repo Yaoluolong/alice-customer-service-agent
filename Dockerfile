@@ -14,6 +14,7 @@ RUN npm ci --ignore-scripts
 RUN npm run build --workspace=packages/shared-types
 # Fetch Alice source from GitHub (Alice is a git submodule; railway up does not upload submodule contents)
 RUN apk add --no-cache git && \
+    rm -rf Alice && \
     git clone --depth=1 https://github.com/Yaoluolong/alice-customer-service-agent.git Alice
 RUN npm run build --workspace=Alice
 
