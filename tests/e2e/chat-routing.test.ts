@@ -57,7 +57,7 @@ describe("Chat routing (heuristic, no LLM)", () => {
     // but route_target stays VISUAL_AGENT (set by router, never changed)
     expect(data.route).toBe("visual_agent");
     // Trace should contain a visual step
-    expect(data.trace.some((t: string) => t.startsWith("visual:"))).toBe(true);
+    expect(data.trace.some((t: any) => t.node === "visual")).toBe(true);
   });
 
   it("unclassifiable text routes to chat_agent (not human_handoff)", async () => {

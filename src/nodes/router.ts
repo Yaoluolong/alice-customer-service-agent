@@ -1,7 +1,7 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { getConfiguredModel } from "../config/models";
 import { buildRouterSystemPrompt } from "../config/persona";
-import { AgentState, RouteTarget, TenantAgentConfig, UserIntent } from "../types";
+import { AgentState, RouteTarget, TenantAgentConfig, TraceEntry, UserIntent } from "../types";
 import { getLastUserText } from "../utils/messages";
 
 const DEFAULT_KEYWORDS: Record<string, string[]> = {
@@ -102,6 +102,8 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
   const hasMedia = Boolean(state.media_context ?? state.image_context);
   const mediaType = state.media_context?.mediaType;
   const tenantConfig = state.tenant_config;
+  const llm = getConfiguredModel("aux", 0);
+  const method = llm ? "llm" : "heuristic";
   const intent = await classifyIntent(
     text,
     hasMedia,
@@ -112,11 +114,26 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
   );
   const target = resolveTarget(intent, hasMedia, tenantConfig);
 
+  const isUnknown = intent === UserIntent.UNKNOWN;
+  const traceEntry: TraceEntry = {
+    node: "router",
+    displayName: "Intent Router",
+    input: text.slice(0, 80),
+    output: `Detected: ${intent} → ${target} (${method})`,
+    metadata: {
+      intent,
+      target,
+      method,
+      severity: isUnknown ? "warn" : "ok",
+      suggestions: isUnknown ? ["Intent not recognized, using default route"] : [],
+    },
+  };
+
   return {
     user_intent: intent,
     route_target: target,
     requires_human: target === RouteTarget.HUMAN_HANDOFF,
-    trace: [`router:${intent}->${target}`]
+    trace: [traceEntry]
   };
 };
 

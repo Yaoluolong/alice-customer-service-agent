@@ -28,14 +28,14 @@ describe("Media message routing", () => {
     expect(status).toBe(200);
     // visualAgentNode sets user_intent=PRODUCT_INQUIRY (by design), route_target stays VISUAL_AGENT
     expect(data.route).toBe("visual_agent");
-    expect(data.trace.some((t: string) => t.startsWith("visual:"))).toBe(true);
+    expect(data.trace.some((t: any) => t.node === "visual")).toBe(true);
   });
 
   it("message with legacy image context also routes through visual_agent", async () => {
     const { status, data } = await postChat(srv.baseUrl, imageContextInput());
     expect(status).toBe(200);
     expect(data.route).toBe("visual_agent");
-    expect(data.trace.some((t: string) => t.startsWith("visual:"))).toBe(true);
+    expect(data.trace.some((t: any) => t.node === "visual")).toBe(true);
   });
 
   it("transcribed audio (text only, no media) routes by text content, not visual_agent", async () => {

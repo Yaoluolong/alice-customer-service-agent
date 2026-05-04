@@ -222,7 +222,7 @@ describe("memoryPersistNode – P-01 through P-07", () => {
     const result = await memoryPersistNode(state, config);
 
     expect(result).toBeDefined();
-    expect(result.trace).toContain("memory:persist=error");
+    expect(result.trace!.some((t: any) => t.node === "memory" && t.output.includes("Persist failed"))).toBe(true);
   });
 
   // P-06: sessionUsed 失败时不影响结果
@@ -280,7 +280,7 @@ describe("memoryPersistNode – P-01 through P-07", () => {
     const result = await memoryPersistNode(state, config);
 
     expect(addMessageMock).not.toHaveBeenCalled();
-    expect(result.trace).toContain("memory:persist=skipped(no-session)");
+    expect(result.trace!.some((t: any) => t.node === "memory" && t.output.includes("Skipped"))).toBe(true);
     expect(result.openviking_message_count).toBe(0);
   });
 });

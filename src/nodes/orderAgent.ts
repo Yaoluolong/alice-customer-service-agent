@@ -1,5 +1,5 @@
 import { HumanMessage } from "@langchain/core/messages";
-import { AgentState, GroundingFacts, UserIntent } from "../types";
+import { AgentState, GroundingFacts, TraceEntry, UserIntent } from "../types";
 import { updateStyleProfileFromUserText } from "../utils/style";
 
 interface MockOrderRecord {
@@ -52,10 +52,18 @@ export const orderAgentNode = async (state: AgentState): Promise<Partial<AgentSt
       fact_confidence: 0.32
     };
 
+    const notFoundTrace: TraceEntry = {
+      node: "order",
+      displayName: "Order Agent",
+      input: orderId ? `Looking up order: ${orderId}` : "Searching orders for user",
+      output: "Order not found",
+      metadata: { orderId: orderId ?? undefined, severity: "warn" },
+    };
+
     return {
       style_profile: nextStyle,
       grounding_facts: missingFacts,
-      trace: ["order:not-found"]
+      trace: [notFoundTrace]
     };
   }
 
@@ -78,9 +86,17 @@ export const orderAgentNode = async (state: AgentState): Promise<Partial<AgentSt
     next_actions: ["如果你愿意，我可以继续帮你预估签收时间", "也可以帮你生成催派送话术"]
   };
 
+  const foundTrace: TraceEntry = {
+    node: "order",
+    displayName: "Order Agent",
+    input: orderId ? `Looking up order: ${orderId}` : "Searching orders for user",
+    output: `Order ${record.orderId}: ${statusMap[record.status]}`,
+    metadata: { orderId: record.orderId, status: statusMap[record.status], severity: "ok" },
+  };
+
   return {
     style_profile: nextStyle,
     grounding_facts: facts,
-    trace: [`order:${record.orderId}`]
+    trace: [foundTrace]
   };
 };

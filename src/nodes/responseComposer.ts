@@ -1,7 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { getConfiguredModel } from "../config/models";
 import { buildComposerSystemPrompt } from "../config/persona";
-import { AgentState, UserTone } from "../types";
+import { AgentState, TraceEntry, UserTone } from "../types";
 import { resolveReplyLanguage } from "../utils/language";
 import { getLastUserText } from "../utils/messages";
 import { detectUserTone } from "../utils/style";
@@ -179,7 +179,7 @@ export const responseComposerNode = async (state: AgentState): Promise<Partial<A
   });
 
   let reply = fallback;
-  let trace = "compose:fallback";
+  let method = "fallback";
 
   if (llm) {
     try {
@@ -214,12 +214,22 @@ export const responseComposerNode = async (state: AgentState): Promise<Partial<A
       const candidate = String(response.content ?? "").trim();
       if (candidate.length > 0) {
         reply = ensureOpeningAndClosing(candidate, opening.text, closing);
-        trace = "compose:model";
+        method = "llm";
       }
     } catch {
-      trace = "compose:fallback";
+      method = "fallback";
     }
   }
+
+  const composerTrace: TraceEntry = {
+    node: "composer",
+    displayName: "Response Composer",
+    input: `Tone: ${userTone}, Language: ${language}`,
+    output: method === "llm"
+      ? `LLM composed reply (${reply.length} chars)`
+      : `Fallback composed reply (${reply.length} chars)`,
+    metadata: { tone: userTone, language, method, replyLength: reply.length, severity: "ok" },
+  };
 
   return {
     reply_language: language,
@@ -228,6 +238,6 @@ export const responseComposerNode = async (state: AgentState): Promise<Partial<A
     draft_reply: reply,
     recent_opening_templates: [...state.recent_opening_templates, opening.id].slice(-3),
     messages: [new AIMessage(reply)],
-    trace: [trace]
+    trace: [composerTrace]
   };
 };

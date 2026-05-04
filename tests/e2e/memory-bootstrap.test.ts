@@ -165,8 +165,8 @@ describe("memoryBootstrap – dual-query & limit", () => {
 
     // The trace contains "lt:N" where N is the number of long-term items loaded
     const trace = result.trace ?? [];
-    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
-    expect(ltEntry).toMatch(/lt:1$/); // deduped: only 1 unique item despite 2 calls
+    const ltEntry = trace.find((t) => t.node === "memory");
+    expect(ltEntry?.output).toContain("1 long-term memories"); // deduped: only 1 unique item despite 2 calls
   });
 
   // M-06: search 和 findMemories 均失败时记忆为空但对话继续
@@ -183,8 +183,8 @@ describe("memoryBootstrap – dual-query & limit", () => {
     expect(result.memory_context?.longTerm.preferences).toHaveLength(0);
     // memoriesLoaded trace should show lt:0
     const trace = result.trace ?? [];
-    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
-    expect(ltEntry).toMatch(/lt:0/);
+    const ltEntry = trace.find((t) => t.node === "memory");
+    expect(ltEntry?.output).toContain("0 long-term memories");
     // Session was still created (OV session API works, only search fails)
     expect(result.openviking_session_id).toBeTruthy();
   });
@@ -218,8 +218,8 @@ describe("memoryBootstrap – dual-query & limit", () => {
     expect(result.openviking_session_id).toBeTruthy();
     // All 100 memories loaded (70 + 30 unique URIs)
     const trace = result.trace ?? [];
-    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
-    expect(ltEntry).toMatch(/lt:100/);
+    const ltEntry = trace.find((t) => t.node === "memory");
+    expect(ltEntry?.output).toContain("100 long-term memories");
   });
 });
 
@@ -270,9 +270,9 @@ describe("memoryBootstrap – session recovery detection", () => {
     const result = await memoryBootstrapNode(makeRecoveryState(), config);
 
     const trace = result.trace ?? [];
-    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
-    expect(ltEntry).toContain("recovery");
-    expect(ltEntry).toContain("ov_existing");
+    const ltEntry = trace.find((t) => t.node === "memory");
+    expect((ltEntry?.metadata as any)?.isRecovery).toBe(true);
+    expect((ltEntry?.metadata as any)?.sessionId).toBe("ov_existing");
   });
 
   it("does NOT flag recovery when OV session has 0 messages", async () => {
@@ -286,8 +286,8 @@ describe("memoryBootstrap – session recovery detection", () => {
     const result = await memoryBootstrapNode(makeRecoveryState(), config);
 
     const trace = result.trace ?? [];
-    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
-    expect(ltEntry).not.toContain("recovery");
+    const ltEntry = trace.find((t) => t.node === "memory");
+    expect((ltEntry?.metadata as any)?.isRecovery).toBe(false);
   });
 
   it("does NOT flag recovery when Alice already has messages in state", async () => {
@@ -306,8 +306,8 @@ describe("memoryBootstrap – session recovery detection", () => {
     const result = await memoryBootstrapNode(stateWithMessages, config);
 
     const trace = result.trace ?? [];
-    const ltEntry = trace.find((t) => t.startsWith("memory:bootstrap="));
-    expect(ltEntry).not.toContain("recovery");
+    const ltEntry = trace.find((t) => t.node === "memory");
+    expect((ltEntry?.metadata as any)?.isRecovery).toBe(false);
   });
 });
 
@@ -751,7 +751,7 @@ describe("Memory Persist — Message Persistence (P-01, P-05, P-06, P-07)", () =
 
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({ text: "你们有什么新款？" }));
     expect(status).toBe(200);
-    expect(data.trace.some((t: string) => t.includes("persist=ok"))).toBe(true);
+    expect(data.trace.some((t: any) => t.node === "memory" && t.output.includes("Saved"))).toBe(true);
   });
 
   // P-05: addMessage fails → conversation continues normally
@@ -765,7 +765,7 @@ describe("Memory Persist — Message Persistence (P-01, P-05, P-06, P-07)", () =
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({ text: "你好" }));
     expect(status).toBe(200);
     expect(data.reply).toBeTruthy();
-    expect(data.trace.some((t: string) => t.includes("persist=error"))).toBe(true);
+    expect(data.trace.some((t: any) => t.node === "memory" && t.output.includes("Persist failed"))).toBe(true);
   });
 
   // P-06: sessionUsed failure → conversation continues normally
@@ -782,7 +782,7 @@ describe("Memory Persist — Message Persistence (P-01, P-05, P-06, P-07)", () =
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({ text: "推荐一双鞋" }));
     expect(status).toBe(200);
     expect(data.reply).toBeTruthy();
-    expect(data.trace.some((t: string) => t.includes("persist=ok"))).toBe(true);
+    expect(data.trace.some((t: any) => t.node === "memory" && t.output.includes("Saved"))).toBe(true);
   });
 
   // P-07: local_ session → persist is skipped entirely
@@ -796,7 +796,7 @@ describe("Memory Persist — Message Persistence (P-01, P-05, P-06, P-07)", () =
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({ text: "你好" }));
     expect(status).toBe(200);
     expect(data.openVikingSessionId).toMatch(/^local_/);
-    expect(data.trace.some((t: string) => t.includes("persist=skipped"))).toBe(true);
+    expect(data.trace.some((t: any) => t.node === "memory" && t.output.includes("Skipped"))).toBe(true);
   });
 });
 
@@ -836,7 +836,7 @@ describe("Session Recovery Detection (R-01, R-02, R-03)", () => {
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({ text: "继续上次的话题" }));
     expect(status).toBe(200);
     expect(data.openVikingSessionId).toBe("ov_sess_recovery_001");
-    expect(data.trace.some((t: string) => t.includes("recovery"))).toBe(true);
+    expect(data.trace.some((t: any) => t.node === "memory" && t.metadata?.isRecovery === true)).toBe(true);
   });
 
   // R-02: New customer → no OV history → NOT recovery
@@ -848,7 +848,7 @@ describe("Session Recovery Detection (R-01, R-02, R-03)", () => {
 
     const { status, data } = await postChat(srv.baseUrl, makeChatInput({ text: "你好，我是新客户" }));
     expect(status).toBe(200);
-    expect(data.trace.some((t: string) => t.includes("recovery"))).toBe(false);
+    expect(data.trace.some((t: any) => t.node === "memory" && t.metadata?.isRecovery === true)).toBe(false);
   });
 
   // R-03: Normal continuation → NOT recovery
@@ -885,6 +885,6 @@ describe("Session Recovery Detection (R-01, R-02, R-03)", () => {
     }));
     expect(status).toBe(200);
     expect(data.openVikingSessionId).toBe(ovSessionId);
-    expect(data.trace.some((t: string) => t.includes("recovery"))).toBe(false);
+    expect(data.trace.some((t: any) => t.node === "memory" && t.metadata?.isRecovery === true)).toBe(false);
   });
 });

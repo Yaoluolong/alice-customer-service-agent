@@ -1,5 +1,5 @@
 import { AIMessage } from "@langchain/core/messages";
-import { AgentState, RouteTarget } from "../types";
+import { AgentState, RouteTarget, TraceEntry } from "../types";
 
 // Customer-facing message must never contain internal reviewer reasons or technical details.
 const buildHandoffReply = (language: string): string => {
@@ -13,11 +13,19 @@ export const humanHandoffNode = async (state: AgentState): Promise<Partial<Agent
   const reason =
     state.handoff_reason ?? state.confidence_reasons[0] ?? "当前信息存在不确定项，需要人工进一步核验";
 
+  const handoffTrace: TraceEntry = {
+    node: "human",
+    displayName: "Human Handoff",
+    input: reason,
+    output: "Transferring to human agent",
+    metadata: { reason, severity: "error" },
+  };
+
   return {
     requires_human: true,
     route_target: RouteTarget.HUMAN_HANDOFF,
     handoff_reason: reason,
-    trace: ["human:required"],
+    trace: [handoffTrace],
     messages: [new AIMessage(buildHandoffReply(state.reply_language))]
   };
 };

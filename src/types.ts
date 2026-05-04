@@ -188,7 +188,15 @@ export interface AgentState {
   style_profile: StyleProfile;
   recent_opening_templates: string[];
 
-  trace: string[];
+  trace: TraceEntry[];
+}
+
+export interface TraceEntry {
+  node: string;
+  displayName: string;
+  input?: string;
+  output: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ChatInput {
@@ -209,7 +217,7 @@ export interface ChatResult {
   intent: UserIntent;
   route: RouteTarget;
   productId: string | null;
-  trace: string[];
+  trace: TraceEntry[];
   preferences: UserPreference[];
   confidence: number;
   handoffReason?: string;

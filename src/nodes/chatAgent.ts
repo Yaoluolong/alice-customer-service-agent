@@ -1,5 +1,5 @@
 import { HumanMessage } from "@langchain/core/messages";
-import { AgentState, GroundingFacts, UserIntent } from "../types";
+import { AgentState, GroundingFacts, TraceEntry, UserIntent } from "../types";
 import { updateStyleProfileFromUserText } from "../utils/style";
 
 const getLastUserText = (state: AgentState): string => {
@@ -38,9 +38,24 @@ export const chatAgentNode = async (state: AgentState): Promise<Partial<AgentSta
     next_actions: ["可继续闲聊", "可引导到商品推荐、库存查询或订单查询"]
   };
 
+  const chatTrace: TraceEntry = {
+    node: "chat",
+    displayName: "Chat Agent",
+    input: userText.slice(0, 80),
+    output: state.user_preferences.length > 0
+      ? `Context prepared (${state.user_preferences.length} known preferences)`
+      : "Context prepared (general conversation)",
+    metadata: {
+      preferencesKnown: state.user_preferences.length > 0,
+      preferenceCount: state.user_preferences.length,
+      factConfidence: facts.fact_confidence,
+      severity: "ok",
+    },
+  };
+
   return {
     style_profile: updateStyleProfileFromUserText(state.style_profile, userText),
     grounding_facts: facts,
-    trace: ["chat:facts-ready"]
+    trace: [chatTrace]
   };
 };

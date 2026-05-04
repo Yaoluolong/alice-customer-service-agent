@@ -2,7 +2,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { inventoryService } from "../mocks/inventory";
 import { resolveOvClient } from "../clients/resolve-ov-client";
-import { AgentState, GroundingFacts, PreferenceExtractor, ProductInfo, UserPreference, UserIntent } from "../types";
+import { AgentState, GroundingFacts, PreferenceExtractor, ProductInfo, TraceEntry, UserPreference, UserIntent } from "../types";
 import { updateStyleProfileFromUserText } from "../utils/style";
 
 const dedupePreferences = (preferences: UserPreference[]): UserPreference[] => {
@@ -151,12 +151,20 @@ export const salesAgentNode = async (state: AgentState, config?: RunnableConfig)
       fact_confidence: 0.35
     };
 
+    const noProductTrace: TraceEntry = {
+      node: "sales",
+      displayName: "Sales Agent",
+      input: mergedPrefs.map((p) => `${p.key}:${JSON.stringify(p.value)}`).join("; ") || "No preferences extracted",
+      output: "No matching product",
+      metadata: { resultCount: retrievedProducts.length, factConfidence: 0.35, severity: "warn", suggestions: ["Knowledge base may lack relevant products"] },
+    };
+
     return {
       retrieved_products: retrievedProducts,
       user_preferences: mergedPrefs,
       style_profile: nextStyle,
       grounding_facts: noProductFacts,
-      trace: ["sales:no-product"]
+      trace: [noProductTrace]
     };
   }
 
@@ -210,12 +218,20 @@ export const salesAgentNode = async (state: AgentState, config?: RunnableConfig)
       : ["可以换一个尺码或颜色，我立刻帮你再查", "我也可以推荐同价位可替代款"]
   };
 
+  const foundTrace: TraceEntry = {
+    node: "sales",
+    displayName: "Sales Agent",
+    input: mergedPrefs.map((p) => `${p.key}:${JSON.stringify(p.value)}`).join("; ") || "No preferences extracted",
+    output: `Found product: ${product.id} (${product.name.slice(0, 60)})`,
+    metadata: { productId: product.id, resultCount: retrievedProducts.length, factConfidence: facts.fact_confidence, severity: "ok", suggestions: [] },
+  };
+
   return {
     current_product_id: product.id,
     retrieved_products: retrievedProducts,
     user_preferences: mergedPrefs,
     style_profile: nextStyle,
     grounding_facts: facts,
-    trace: [`sales:product=${product.id}`]
+    trace: [foundTrace]
   };
 };

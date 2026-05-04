@@ -2,7 +2,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { getConfiguredModel } from "../config/models";
 import { resolveOvClient } from "../clients/resolve-ov-client";
-import { AgentState, GroundingFacts, MediaContext, ProductInfo, UserIntent } from "../types";
+import { AgentState, GroundingFacts, MediaContext, ProductInfo, TraceEntry, UserIntent } from "../types";
 
 const getLastUserText = (state: AgentState): string => {
   for (let i = state.messages.length - 1; i >= 0; i -= 1) {
@@ -148,12 +148,27 @@ export const visualAgentNode = async (state: AgentState, config?: RunnableConfig
         next_actions: ["请补充商品关键词或更清晰图片"]
       };
 
+  const visualTrace: TraceEntry = {
+    node: "visual",
+    displayName: "Visual Search",
+    input: `Image uploaded${query ? ` + "${query.slice(0, 50)}"` : ""}`,
+    output: products.length > 0
+      ? `Found ${products.length} similar products`
+      : "No similar products found",
+    metadata: {
+      descriptionLength: description.length,
+      resultCount: products.length,
+      topScore: top?.similarityScore,
+      severity: products.length > 0 ? "ok" : "warn",
+    },
+  };
+
   return {
     media_context: updatedMedia,
     retrieved_products: products,
     current_product_id: top?.id ?? null,
     user_intent: UserIntent.PRODUCT_INQUIRY,
     grounding_facts: grounding,
-    trace: [`visual:found=${products.length},desc=${description.length > 0 ? "yes" : "no"}`]
+    trace: [visualTrace]
   };
 };

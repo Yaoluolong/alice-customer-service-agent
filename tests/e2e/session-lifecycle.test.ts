@@ -217,6 +217,6 @@ describe("S-05: memoryPersistNode triggers commit at message count 20", () => {
 
     // Trace should record the commit threshold
     expect(result.trace).toBeDefined();
-    expect(result.trace!.some((t: string) => t.includes("commit@20"))).toBe(true);
+    expect(result.trace!.some((t: any) => t.node === "memory" && t.output.includes("commit triggered"))).toBe(true);
   });
 });

@@ -4,7 +4,7 @@ import { appConfig } from "../config/env";
 import { getConfiguredModel } from "../config/models";
 import { BANNED_MECHANICAL_PHRASES, buildReviewerSystemPrompt } from "../config/persona";
 import { logger } from "../logger";
-import { AgentState } from "../types";
+import { AgentState, TraceEntry } from "../types";
 import { getLastAssistantText } from "../utils/messages";
 
 const reviewSchema = z.object({
@@ -86,12 +86,21 @@ const parseReviewPayload = (raw: string): ReviewPayload => {
   return reviewSchema.parse(parsed);
 };
 
+const FLAG_SUGGESTIONS: Record<string, string> = {
+  no_grounding_facts: "Add product/knowledge data to improve grounding",
+  contains_unknowns: "Response contains uncertain information",
+  too_short: "Response may be too brief",
+  mechanical_phrase: "Response sounds robotic, adjust soul prompt",
+  repetitive_opening: "Opening repeats recent pattern",
+  llm_review_fallback: "LLM review failed, used heuristic fallback",
+};
+
 export const responseReviewerNode = async (state: AgentState): Promise<Partial<AgentState>> => {
   const reply = state.draft_reply ?? getLastAssistantText(state.messages);
 
   const llm = getConfiguredModel("aux", 0);
   let payload: ReviewPayload;
-  let trace = "review:heuristic";
+  let method = "heuristic";
 
   if (!llm) {
     payload = heuristicReview(state, reply);
@@ -111,14 +120,32 @@ export const responseReviewerNode = async (state: AgentState): Promise<Partial<A
       ]);
 
       payload = parseReviewPayload(String(response.content ?? ""));
-      trace = "review:model";
+      method = "llm";
     } catch (err) {
       logger.warn({ err: (err as Error).message }, "response-reviewer LLM review failed, falling back to heuristic");
       payload = heuristicReview(state, reply);
       payload.flags.push("llm_review_fallback");
-      trace = "review:llm-failed-heuristic-fallback";
+      method = "heuristic";
     }
   }
+
+  const suggestions = payload.flags
+    .map((f) => FLAG_SUGGESTIONS[f])
+    .filter(Boolean) as string[];
+
+  const reviewerTrace: TraceEntry = {
+    node: "reviewer",
+    displayName: "Response Reviewer",
+    input: `Reviewing draft reply (${reply.length} chars)`,
+    output: `Score: ${payload.score.toFixed(2)} — ${payload.flags.length ? payload.flags.join(", ") : "no issues"}`,
+    metadata: {
+      score: payload.score,
+      flags: payload.flags,
+      method,
+      severity: payload.flags.length > 0 ? "warn" : "ok",
+      suggestions,
+    },
+  };
 
   return {
     agent_confidence: clamp(payload.score, 0, 1),
@@ -126,7 +153,7 @@ export const responseReviewerNode = async (state: AgentState): Promise<Partial<A
     confidence_reasons: payload.reasons,
     requires_human: state.requires_human || payload.must_handoff,
     handoff_reason: payload.must_handoff ? payload.reasons[0] ?? "自动审校判定需要人工介入" : state.handoff_reason,
-    trace: [trace]
+    trace: [reviewerTrace]
   };
 };
 

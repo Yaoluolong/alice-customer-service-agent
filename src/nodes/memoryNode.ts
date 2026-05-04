@@ -3,7 +3,7 @@ import { RunnableConfig } from "@langchain/core/runnables";
 import { MessagePart } from "../clients/openviking-client";
 import { resolveOvClient } from "../clients/resolve-ov-client";
 import { logger } from "../logger";
-import { AgentState, MemoryContext, SearchItem } from "../types";
+import { AgentState, MemoryContext, SearchItem, TraceEntry } from "../types";
 
 const MESSAGE_COMMIT_THRESHOLD = 20;
 
@@ -223,17 +223,35 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
   const profileText = profile ?? "";
   const existingStyle = state.style_profile;
 
+  const categories = [
+    preferences.length && "preferences",
+    entities.length && "entities",
+    events.length && "events",
+    cases.length && "cases",
+    patterns.length && "patterns",
+    profile && "profile",
+  ].filter(Boolean);
+
+  const bootstrapTrace: TraceEntry = {
+    node: "memory",
+    displayName: "Memory",
+    input: userQuery.slice(0, 50),
+    output: `Loaded ${longTermItems.length} long-term memories${categories.length ? ` (${categories.join(", ")})` : ""}`,
+    metadata: {
+      sessionId: ovSessionId,
+      isRecovery: isSessionRecovery,
+      longTermCount: longTermItems.length,
+      severity: "ok",
+    },
+  };
+
   return {
     openviking_session_id: ovSessionId,
     openviking_message_count: ovMessageCount,
     memory_context: memoryContext,
     conversation_summary: sessionSummaries[0] ?? state.conversation_summary,
     style_profile: existingStyle,
-    trace: [
-      isSessionRecovery
-        ? `memory:bootstrap=recovery,session:${ovSessionId},lt:${longTermItems.length}`
-        : `memory:bootstrap=session:${ovSessionId},lt:${longTermItems.length}`
-    ]
+    trace: [bootstrapTrace]
   };
 };
 
@@ -244,7 +262,13 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
   if (!openviking_session_id || openviking_session_id.startsWith("local_")) {
     return {
       openviking_message_count: 0,
-      trace: ["memory:persist=skipped(no-session)"]
+      trace: [{
+        node: "memory",
+        displayName: "Memory",
+        input: "0 messages to save",
+        output: "Skipped (no session)",
+        metadata: { messageCount: 0, severity: "ok" },
+      }]
     };
   }
 
@@ -332,19 +356,37 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
       return {
         openviking_session_id: null,
         openviking_message_count: 0,
-        trace: [`memory:persist=ok,commit@${nextMessageCount}`]
+        trace: [{
+          node: "memory",
+          displayName: "Memory",
+          input: `${persistedMessages} messages to save`,
+          output: `Saved ${persistedMessages} messages, commit triggered at ${nextMessageCount}`,
+          metadata: { messageCount: persistedMessages, commitTriggered: true, severity: "ok" },
+        }]
       };
     }
   } catch {
     // Non-fatal: persist failure doesn't break the response
     return {
       openviking_message_count: state.openviking_message_count ?? 0,
-      trace: ["memory:persist=error"]
+      trace: [{
+        node: "memory",
+        displayName: "Memory",
+        input: `${persistedMessages} messages to save`,
+        output: "Persist failed",
+        metadata: { messageCount: persistedMessages, severity: "error" },
+      }]
     };
   }
 
   return {
     openviking_message_count: (state.openviking_message_count ?? 0) + persistedMessages,
-    trace: [`memory:persist=ok,+${persistedMessages}`]
+    trace: [{
+      node: "memory",
+      displayName: "Memory",
+      input: `${persistedMessages} messages to save`,
+      output: `Saved ${persistedMessages} messages`,
+      metadata: { messageCount: persistedMessages, severity: "ok" },
+    }]
   };
 };

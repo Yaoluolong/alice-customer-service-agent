@@ -11,7 +11,7 @@ import { responseReviewerNode } from "./nodes/responseReviewer";
 import { routerCondition, routerNode } from "./nodes/router";
 import { salesAgentNode } from "./nodes/salesAgent";
 import { visualAgentNode } from "./nodes/visualAgent";
-import { AgentState, RouteTarget, TenantAgentConfig, UserIntent } from "./types";
+import { AgentState, RouteTarget, TenantAgentConfig, TraceEntry, UserIntent } from "./types";
 
 export const AgentStateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -49,7 +49,7 @@ export const AgentStateAnnotation = Annotation.Root({
   style_profile: Annotation<AgentState["style_profile"]>,
   recent_opening_templates: Annotation<string[]>,
 
-  trace: Annotation<string[]>({
+  trace: Annotation<TraceEntry[]>({
     reducer: (left, right) => left.concat(right),
     default: () => []
   })

@@ -1,7 +1,7 @@
 import { HumanMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { resolveOvClient } from "../clients/resolve-ov-client";
-import { AgentState, GroundingFacts, UserIntent } from "../types";
+import { AgentState, GroundingFacts, TraceEntry, UserIntent } from "../types";
 
 const getLastUserText = (state: AgentState): string => {
   for (let i = state.messages.length - 1; i >= 0; i -= 1) {
@@ -47,7 +47,14 @@ export const knowledgeAgentNode = async (
       unknowns: ["no matching knowledge found in knowledge base"],
       next_actions: ["suggest rephrasing or contacting human support"]
     };
-    return { grounding_facts: noResultFacts, trace: ["knowledge_agent:no_results"] };
+    const noResultTrace: TraceEntry = {
+      node: "knowledge_agent",
+      displayName: "Knowledge Agent",
+      input: userText.slice(0, 80),
+      output: "No results",
+      metadata: { resultCount: 0, severity: "warn", suggestions: ["Knowledge base may lack relevant content"] },
+    };
+    return { grounding_facts: noResultFacts, trace: [noResultTrace] };
   }
 
   // Enrich top-1 result with L2 detail if available
@@ -82,8 +89,16 @@ export const knowledgeAgentNode = async (
     next_actions: ["answer based on knowledge base content"]
   };
 
+  const foundTrace: TraceEntry = {
+    node: "knowledge_agent",
+    displayName: "Knowledge Agent",
+    input: userText.slice(0, 80),
+    output: `Found ${items.length} articles (top score: ${items[0].score.toFixed(2)})`,
+    metadata: { resultCount: items.length, topScore: items[0].score, severity: "ok", suggestions: [] },
+  };
+
   return {
     grounding_facts: facts,
-    trace: [`knowledge_agent:found=${items.length}`]
+    trace: [foundTrace]
   };
 };
