@@ -11,19 +11,76 @@ import { extractFirstFrame } from "../utils/video-frame";
 
 // ── Trace string → structured TraceNode conversion ──────────────────────────
 
-const TRACE_PREFIX_MAP: Record<string, string> = {
-  router: "router",
-  sales: "sales_agent",
-  visual: "visual_agent",
-  chat: "chat_agent",
-  knowledge_agent: "knowledge_agent",
-  order: "order_agent",
-  composer: "response_composer",
-  reviewer: "response_reviewer",
-  gate: "confidence_gate",
-  human: "human_handoff",
-  memory: "memory_persist",
+// Human-readable node names for trace display
+const TRACE_NODE_NAMES: Record<string, string> = {
+  router: "Intent Router",
+  sales: "Sales Agent",
+  visual: "Visual Search",
+  chat: "Chat Agent",
+  knowledge_agent: "Knowledge Agent",
+  order: "Order Agent",
+  composer: "Response Composer",
+  reviewer: "Response Reviewer",
+  gate: "Confidence Gate",
+  human: "Human Handoff",
+  memory: "Memory",
 };
+
+// Convert raw trace details into human-readable descriptions
+function humanizeDetails(prefix: string, details: string | undefined): string | undefined {
+  if (!details) return undefined;
+  switch (prefix) {
+    case "memory":
+      if (details.startsWith("bootstrap=")) {
+        const lt = details.match(/lt:(\d+)/)?.[1] ?? "0";
+        return `Loaded ${lt} long-term memories`;
+      }
+      if (details.startsWith("persist=ok")) {
+        const count = details.match(/\+(\d+)/)?.[1];
+        return count ? `Saved ${count} messages` : "Persisted";
+      }
+      if (details.includes("skipped")) return "Skipped (no session)";
+      if (details.includes("error")) return "Persist failed";
+      return details;
+    case "router": {
+      const m = details.match(/^(.+)->(.+)$/);
+      if (m) return `${m[1].replace(/_/g, " ")} → ${m[2].replace(/_/g, " ")}`;
+      return details;
+    }
+    case "gate":
+      if (details.startsWith("continue@")) return `Passed (score: ${details.slice(9)})`;
+      if (details.startsWith("handoff@")) return `Handoff triggered (score: ${details.slice(8)})`;
+      return details;
+    case "reviewer":
+      if (details === "model") return "LLM review";
+      if (details.includes("heuristic")) return "Heuristic fallback (LLM unavailable)";
+      return details;
+    case "composer":
+      if (details === "model") return "LLM composed";
+      return details;
+    case "sales":
+      if (details.startsWith("product=")) return `Found product: ${details.slice(8)}`;
+      if (details === "no-product") return "No product found";
+      return details;
+    case "visual":
+      return details.replace(/found=(\d+)/, "Found $1 products").replace(/desc=(yes|no)/, "description: $1");
+    case "knowledge_agent":
+      if (details.startsWith("found=")) return `Found ${details.slice(6)} results`;
+      if (details === "no_results") return "No results found";
+      return details;
+    case "chat":
+      if (details === "facts-ready") return "Context prepared";
+      return details;
+    case "order":
+      if (details === "not-found") return "Order not found";
+      return `Order: ${details}`;
+    case "human":
+      if (details === "required") return "Transferring to human agent";
+      return details;
+    default:
+      return details;
+  }
+}
 
 function convertTraceStrings(traces: string[]): ReplyJobData["trace"] {
   return traces.map((raw, index) => {
@@ -31,9 +88,9 @@ function convertTraceStrings(traces: string[]): ReplyJobData["trace"] {
     const prefix = colonIdx > 0 ? raw.slice(0, colonIdx) : raw;
     const details = colonIdx > 0 ? raw.slice(colonIdx + 1) : undefined;
     return {
-      nodeName: TRACE_PREFIX_MAP[prefix] ?? prefix,
+      nodeName: TRACE_NODE_NAMES[prefix] ?? prefix,
       nodeOrder: index,
-      outputSummary: details,
+      outputSummary: humanizeDetails(prefix, details),
       latencyMs: 0,
     };
   });
