@@ -9,6 +9,36 @@ import { customerServiceAgentService } from "../service";
 import { QUEUE_NAMES, RequestJobData, ReplyJobData, CoalesceJobData } from "./types";
 import { extractFirstFrame } from "../utils/video-frame";
 
+// ── Trace string → structured TraceNode conversion ──────────────────────────
+
+const TRACE_PREFIX_MAP: Record<string, string> = {
+  router: "router",
+  sales: "sales_agent",
+  visual: "visual_agent",
+  chat: "chat_agent",
+  knowledge_agent: "knowledge_agent",
+  order: "order_agent",
+  composer: "response_composer",
+  reviewer: "response_reviewer",
+  gate: "confidence_gate",
+  human: "human_handoff",
+  memory: "memory_persist",
+};
+
+function convertTraceStrings(traces: string[]): ReplyJobData["trace"] {
+  return traces.map((raw, index) => {
+    const colonIdx = raw.indexOf(":");
+    const prefix = colonIdx > 0 ? raw.slice(0, colonIdx) : raw;
+    const details = colonIdx > 0 ? raw.slice(colonIdx + 1) : undefined;
+    return {
+      nodeName: TRACE_PREFIX_MAP[prefix] ?? prefix,
+      nodeOrder: index,
+      outputSummary: details,
+      latencyMs: 0,
+    };
+  });
+}
+
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const CONCURRENCY = Number(process.env.QUEUE_CONCURRENCY ?? "5");
 const RATE_LIMIT_MAX = Number(process.env.QUEUE_RATE_LIMIT_PER_MIN ?? "0"); // 0 = no limit
@@ -181,6 +211,7 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
             confidence: result.confidence,
             handoff: isHandoff,
             handoffReason: result.handoffReason,
+            trace: result.trace?.length ? convertTraceStrings(result.trace) : undefined,
           });
         });
 
@@ -291,6 +322,7 @@ export function startRequestWorker(): Worker<RequestJobData | CoalesceJobData> {
           handoff: isHandoff,
           handoffReason: result.handoffReason,
           playground: playground ?? false,
+          trace: result.trace?.length ? convertTraceStrings(result.trace) : undefined,
         });
       });
     },
