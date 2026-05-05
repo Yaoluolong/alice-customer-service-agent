@@ -8,7 +8,7 @@ import { AgentState, TraceEntry } from "../types";
 import { getLastAssistantText } from "../utils/messages";
 
 const reviewSchema = z.object({
-  score: z.number().min(0).max(1),
+  score: z.coerce.number().min(0).max(1),
   flags: z.array(z.string()).default([]),
   reasons: z.array(z.string()).default([]),
   must_handoff: z.boolean().default(false)
@@ -28,6 +28,15 @@ const extractJsonObject = (text: string): string | null => {
     return text.slice(start, end + 1);
   }
   return null;
+};
+
+const parseReviewPayload = (raw: string): ReviewPayload => {
+  const json = extractJsonObject(raw);
+  if (!json) {
+    throw new Error("review output does not contain JSON object");
+  }
+  const parsed = JSON.parse(json) as unknown;
+  return reviewSchema.parse(parsed);
 };
 
 const heuristicReview = (state: AgentState, reply: string): ReviewPayload => {
@@ -77,15 +86,6 @@ const heuristicReview = (state: AgentState, reply: string): ReviewPayload => {
   };
 };
 
-const parseReviewPayload = (raw: string): ReviewPayload => {
-  const json = extractJsonObject(raw);
-  if (!json) {
-    throw new Error("review output does not contain JSON object");
-  }
-  const parsed = JSON.parse(json) as unknown;
-  return reviewSchema.parse(parsed);
-};
-
 const FLAG_SUGGESTIONS: Record<string, string> = {
   no_grounding_facts: "Add product/knowledge data to improve grounding",
   contains_unknowns: "Response contains uncertain information",
@@ -98,14 +98,18 @@ const FLAG_SUGGESTIONS: Record<string, string> = {
 export const responseReviewerNode = async (state: AgentState): Promise<Partial<AgentState>> => {
   const reply = state.draft_reply ?? getLastAssistantText(state.messages);
 
-  const llm = getConfiguredModel("aux", 0);
+  const llmBase = getConfiguredModel("aux", 0);
   let payload: ReviewPayload;
   let method = "heuristic";
 
-  if (!llm) {
+  if (!llmBase) {
     payload = heuristicReview(state, reply);
   } else {
     try {
+      // Use response_format json_object to force valid JSON output from the model.
+      // withStructuredOutput is not used as it relies on tool-calling which some
+      // OpenAI-compatible providers (e.g. Moonshot) reject.
+      const llm = llmBase.bind({ response_format: { type: "json_object" } });
       const response = await llm.invoke([
         new SystemMessage(await buildReviewerSystemPrompt(state.reply_language, state.tenant_config?.soulPrompt)),
         new HumanMessage(
@@ -118,11 +122,14 @@ export const responseReviewerNode = async (state: AgentState): Promise<Partial<A
           })
         )
       ]);
-
       payload = parseReviewPayload(String(response.content ?? ""));
       method = "llm";
     } catch (err) {
-      logger.warn({ err: (err as Error).message }, "response-reviewer LLM review failed, falling back to heuristic");
+      const e = err as Error & { status?: number; code?: string };
+      logger.warn(
+        { errType: e.constructor?.name, errMsg: e.message, status: e.status, code: e.code },
+        "response-reviewer LLM review failed, falling back to heuristic"
+      );
       payload = heuristicReview(state, reply);
       payload.flags.push("llm_review_fallback");
       method = "heuristic";
@@ -157,4 +164,3 @@ export const responseReviewerNode = async (state: AgentState): Promise<Partial<A
   };
 };
 
-export { parseReviewPayload };
