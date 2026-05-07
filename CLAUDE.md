@@ -25,7 +25,9 @@ memoryBootstrap → router → [visual|sales|order|chat|knowledge]Agent → resp
 
 - `visual_agent → sales_agent` 串联（图搜后查库存）
 - `confidenceGate` 决定是继续回复（→ memoryPersist）还是转人工（→ humanHandoff → memoryPersist）
-- `router` 检查 `tenant_config.enabledAgents`，禁用的 agent fallback 到 `chat_agent`（`HUMAN_HANDOFF` 不受此限制）
+- `router` 支持 Layered Routing：Layer 0 (hard rules: media→visual) → Layer 1 (LLM/heuristic intent classification) → Layer 2 (configurable intentMapping) → Layer 3 (configurable defaultAgent fallback)
+- `tenant_config.routingPolicy` 控制路由策略：`defaultAgent`（general_chat/unknown 的 fallback）、`intentMapping`（覆盖 intent→agent 映射）、`routerInstruction`（追加 LLM 分类指令）
+- `enabledAgents` 仍然生效：禁用的 agent fallback 到 `defaultAgent`，再到 `chat_agent`（`HUMAN_HANDOFF` 不受此限制）
 
 ### Key Files
 

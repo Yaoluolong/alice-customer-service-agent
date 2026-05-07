@@ -41,12 +41,21 @@ const ROUTER_INSTRUCTION_EN = "You are a customer service router. Output exactly
 
 const ROUTER_INSTRUCTION_ZH = "你是客服路由器。只输出一个意图: visual_search/knowledge_query/product_inquiry/order_status/general_chat/unknown。若 has_media=true 必须输出 visual_search。knowledge_query 用于：退换货政策、售后、保修、运费、支付方式、关税、下单流程、商品保养与护理方法、正品验货说明、团队介绍、折扣码政策、货到付款、批发询价等规则/流程类问题；product_inquiry 用于商品咨询、库存、价格、推荐、尺码对比。禁止输出其他内容。";
 
-export const buildRouterSystemPrompt = async (soulPrompt?: string, language?: string): Promise<string> =>
-  buildPrompt(
+export const buildRouterSystemPrompt = async (
+  soulPrompt?: string,
+  language?: string,
+  routerInstruction?: string
+): Promise<string> => {
+  const base = await buildPrompt(
     language === "en-US" ? ROUTER_INSTRUCTION_EN : ROUTER_INSTRUCTION_ZH,
     soulPrompt,
     language
   );
+  if (routerInstruction) {
+    return base + "\n\nAdditional rules:\n" + routerInstruction;
+  }
+  return base;
+};
 
 export const buildComposerSystemPrompt = async (params: {
   language: string;

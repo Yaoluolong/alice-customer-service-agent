@@ -44,14 +44,15 @@ const classifyIntent = async (
   mediaType?: string,
   keywordOverrides?: Record<string, string[]>,
   soulPrompt?: string,
-  language?: string
+  language?: string,
+  routerInstruction?: string
 ): Promise<UserIntent> => {
   const llm = getConfiguredModel("aux", 0);
   if (!llm) return heuristicClassify(text, hasMedia, keywordOverrides);
 
   try {
     const response = await llm.invoke([
-      new SystemMessage(await buildRouterSystemPrompt(soulPrompt, language)),
+      new SystemMessage(await buildRouterSystemPrompt(soulPrompt, language, routerInstruction)),
       new HumanMessage(`has_media=${hasMedia}; media_type=${mediaType ?? "none"}; text=${text}`)
     ]);
     const normalized = String(response.content).trim().toLowerCase();
@@ -66,35 +67,56 @@ const classifyIntent = async (
   }
 };
 
+const DEFAULT_INTENT_MAPPING: Record<UserIntent, RouteTarget> = {
+  [UserIntent.VISUAL_SEARCH]: RouteTarget.VISUAL_AGENT,
+  [UserIntent.VIDEO_SEARCH]: RouteTarget.VISUAL_AGENT,
+  [UserIntent.PRODUCT_INQUIRY]: RouteTarget.SALES_AGENT,
+  [UserIntent.ORDER_STATUS]: RouteTarget.ORDER_AGENT,
+  [UserIntent.KNOWLEDGE_QUERY]: RouteTarget.KNOWLEDGE_AGENT,
+  [UserIntent.GENERAL_CHAT]: RouteTarget.CHAT_AGENT,
+  [UserIntent.UNKNOWN]: RouteTarget.CHAT_AGENT,
+};
+
+const isEnabled = (
+  target: RouteTarget,
+  enabled: RouteTarget[] | undefined,
+  fallback: RouteTarget
+): RouteTarget => {
+  if (!enabled || enabled.length === 0 || enabled.includes(target)) return target;
+  if (enabled.includes(fallback)) return fallback;
+  return RouteTarget.CHAT_AGENT;
+};
+
 const resolveTarget = (
   intent: UserIntent,
   hasMedia: boolean,
   tenantConfig?: TenantAgentConfig | null
 ): RouteTarget => {
-  let target: RouteTarget;
-
-  if (hasMedia || intent === UserIntent.VISUAL_SEARCH || intent === UserIntent.VIDEO_SEARCH) {
-    target = RouteTarget.VISUAL_AGENT;
-  } else if (intent === UserIntent.ORDER_STATUS) {
-    target = RouteTarget.ORDER_AGENT;
-  } else if (intent === UserIntent.KNOWLEDGE_QUERY) {
-    target = RouteTarget.KNOWLEDGE_AGENT;
-  } else if (intent === UserIntent.GENERAL_CHAT) {
-    target = RouteTarget.CHAT_AGENT;
-  } else if (intent === UserIntent.PRODUCT_INQUIRY) {
-    target = RouteTarget.SALES_AGENT;
-  } else {
-    return RouteTarget.CHAT_AGENT; // UNKNOWN → chatAgent as graceful fallback
-  }
-
-  // Enforce enabledAgents: if this agent is disabled by the tenant, fallback to chat_agent.
-  // HUMAN_HANDOFF is never blocked by enabledAgents.
+  const policy = tenantConfig?.routingPolicy;
   const enabled = tenantConfig?.enabledAgents;
-  if (enabled && enabled.length > 0 && !enabled.includes(target)) {
-    return RouteTarget.CHAT_AGENT;
+  const defaultAgent = policy?.defaultAgent ?? RouteTarget.CHAT_AGENT;
+
+  // Layer 0: Hard rules — media always goes to visual
+  if (hasMedia || intent === UserIntent.VISUAL_SEARCH || intent === UserIntent.VIDEO_SEARCH) {
+    return isEnabled(RouteTarget.VISUAL_AGENT, enabled, defaultAgent);
   }
 
-  return target;
+  // Layer 2: Check tenant intentMapping override first
+  const overrideTarget = policy?.intentMapping?.[intent];
+  if (overrideTarget) {
+    return isEnabled(overrideTarget, enabled, defaultAgent);
+  }
+
+  // Layer 2 fallback: system default mapping (for non-fallback intents)
+  if (intent !== UserIntent.GENERAL_CHAT && intent !== UserIntent.UNKNOWN) {
+    const systemTarget = DEFAULT_INTENT_MAPPING[intent];
+    if (systemTarget) {
+      return isEnabled(systemTarget, enabled, defaultAgent);
+    }
+  }
+
+  // Layer 3: Default agent for general_chat / unknown
+  return isEnabled(defaultAgent, enabled, RouteTarget.CHAT_AGENT);
 };
 
 export const routerNode = async (state: AgentState): Promise<Partial<AgentState>> => {
@@ -110,7 +132,8 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
     mediaType,
     tenantConfig?.routerKeywords,
     tenantConfig?.soulPrompt,
-    tenantConfig?.defaultLanguage ?? state.reply_language
+    tenantConfig?.defaultLanguage ?? state.reply_language,
+    tenantConfig?.routingPolicy?.routerInstruction
   );
   const target = resolveTarget(intent, hasMedia, tenantConfig);
 

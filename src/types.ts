@@ -21,6 +21,15 @@ export interface PreferenceExtractor {
   confidence: number;
 }
 
+export interface RoutingPolicy {
+  /** Layer 3: agent to use when intent is general_chat or unknown */
+  defaultAgent?: RouteTarget;
+  /** Layer 2: override specific intent→agent mappings */
+  intentMapping?: Partial<Record<UserIntent, RouteTarget>>;
+  /** Layer 4: appended to router LLM system prompt */
+  routerInstruction?: string;
+}
+
 export interface TenantAgentConfig {
   /** Custom soul prompt — overrides SOUL.md when provided */
   soulPrompt?: string;
@@ -28,6 +37,8 @@ export interface TenantAgentConfig {
   enabledAgents?: RouteTarget[];
   /** Intent keyword overrides for heuristic router */
   routerKeywords?: Record<string, string[]>;
+  /** Routing policy — controls intent→agent mapping and default agent */
+  routingPolicy?: RoutingPolicy;
   /** Knowledge directory structure + search scopes */
   knowledgeSchema?: KnowledgeSchema;
   /** Custom preference extractors — replaces hardcoded extractPreferencesFromText */
