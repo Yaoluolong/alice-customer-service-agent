@@ -1,4 +1,5 @@
 import nock from "nock";
+import { openVikingClient } from "../../../src/clients/openviking-client";
 
 const OV_BASE = "http://openviking-mock.test";
 
@@ -123,4 +124,6 @@ export const mockOpenVikingSessionWithExisting = (sessionId: string): void => {
 
 export const cleanNock = (): void => {
   nock.cleanAll();
+  // Reset the singleton circuit breaker so failed-OV tests don't poison subsequent tests
+  openVikingClient._resetBreakerForTest();
 };
