@@ -108,8 +108,8 @@ export const buildReviewerSystemPrompt = async (language: string, soulPrompt?: s
   const instruction = isEnglish
     ? [
         "You are a customer reply quality reviewer. Score strictly based on the input and output JSON.",
-        "Scoring dimensions: factual consistency (0.5), actionability (0.2), naturalness (0.2), template repetition penalty (0.1).",
-        "Output must be a JSON object with fixed fields: score (0-1), flags (string[]), reasons (string[]), must_handoff (boolean).",
+        "Scoring dimensions: factual consistency (0.30), completeness (0.20), actionability (0.15), naturalness (0.15, includes template repetition), coherence (0.10), tone match (0.10).",
+        "Output must be a JSON object with fixed fields: score (0-1), flags (string[]), reasons (string[]), must_handoff (boolean). Optional: dimension_scores (object mapping dimension name to 0-1 score).",
         `If mechanical phrases are detected (${bannedList}), add to flags.`,
         "Set must_handoff=true ONLY when the reply contains clearly wrong numbers (e.g. wrong price, wrong order ID) stated as fact.",
         "Brand/product mismatch (customer asks brand A but knowledge base only has brand B) must NOT trigger must_handoff — lower the score but keep must_handoff=false.",
@@ -117,8 +117,8 @@ export const buildReviewerSystemPrompt = async (language: string, soulPrompt?: s
       ].join("\n")
     : [
         "你是客服回复审校器。请基于输入内容严格评分并输出 JSON。",
-        "评分维度：事实一致性(0.5)、可执行性(0.2)、自然度(0.2)、重复模板惩罚(0.1)。",
-        "输出必须是 JSON 对象，字段固定：score(0-1), flags(string[]), reasons(string[]), must_handoff(boolean)。",
+        "评分维度：事实一致性(0.30)、完整性(0.20)、可执行性(0.15)、自然度(0.15，含重复模板惩罚)、连贯性(0.10)、语气匹配(0.10)。",
+        "输出必须是 JSON 对象，字段固定：score(0-1), flags(string[]), reasons(string[]), must_handoff(boolean)。可选字段：dimension_scores（维度名到0-1分数的映射对象）。",
         `若发现机械词（${bannedList}）需加入 flags。`,
         "must_handoff 仅在以下情况设为 true：回复包含明确的错误数字（如错误的价格、错误的订单号）并被当作事实陈述。",
         "品牌或商品不匹配（如客户问A品牌但知识库只有B品牌）不得触发 must_handoff，应降低 score 但保持 must_handoff=false，因为客服无法控制知识库覆盖范围。",

@@ -39,6 +39,31 @@ const parseReviewPayload = (raw: string): ReviewPayload => {
   return reviewSchema.parse(parsed);
 };
 
+export function heuristicCompleteness(userMessage: string, reply: string): number {
+  const questionCount = (userMessage.match(/[?？]/g) ?? []).length;
+  if (questionCount === 0) return 0;
+  const segments = reply.split(/[。.!！\n]/).filter((s) => s.trim().length > 5).length;
+  if (segments >= questionCount) return 0;
+  return -0.15;
+}
+
+export function heuristicCoherence(conversationSummary: string | null, reply: string): number {
+  if (!conversationSummary || conversationSummary.length < 10) return 0;
+  const keyTerms = conversationSummary.match(/[\u4e00-\u9fff]{2,}|[a-zA-Z]{4,}/g) ?? [];
+  if (keyTerms.length === 0) return 0;
+  const hasOverlap = keyTerms.some((term) => reply.includes(term));
+  return hasOverlap ? 0 : -0.08;
+}
+
+export function heuristicToneMatch(toneApplied: string | null, reply: string): number {
+  if (!toneApplied || toneApplied === "neutral") return 0;
+  if (toneApplied === "urgent") {
+    const casualPatterns = /慢慢|不着急|不急|take your time|no rush/i;
+    if (casualPatterns.test(reply)) return -0.10;
+  }
+  return 0;
+}
+
 const heuristicReview = (state: AgentState, reply: string): ReviewPayload => {
   const flags: string[] = [];
   const reasons: string[] = [];
@@ -77,6 +102,20 @@ const heuristicReview = (state: AgentState, reply: string): ReviewPayload => {
     reasons.push("开场表达重复");
   }
 
+  // New dimensions
+  const lastUserMsg = state.messages?.length
+    ? (state.messages[state.messages.length - 1]?.content as string) ?? ""
+    : "";
+
+  const completePenalty = heuristicCompleteness(lastUserMsg, reply);
+  if (completePenalty < 0) { score += completePenalty; flags.push("incomplete_answer"); reasons.push("未完整回答所有问题"); }
+
+  const coherencePenalty = heuristicCoherence(state.conversation_summary, reply);
+  if (coherencePenalty < 0) { score += coherencePenalty; flags.push("incoherent"); reasons.push("与对话历史不连贯"); }
+
+  const tonePenalty = heuristicToneMatch(state.tone_applied, reply);
+  if (tonePenalty < 0) { score += tonePenalty; flags.push("tone_mismatch"); reasons.push("语气与用户情绪不匹配"); }
+
   const normalizedScore = clamp(score, 0, 1);
   return {
     score: normalizedScore,
@@ -92,6 +131,9 @@ const FLAG_SUGGESTIONS: Record<string, string> = {
   too_short: "Response may be too brief",
   mechanical_phrase: "Response sounds robotic, adjust soul prompt",
   repetitive_opening: "Opening repeats recent pattern",
+  incomplete_answer: "Response does not address all user questions",
+  incoherent: "Response seems unrelated to conversation context",
+  tone_mismatch: "Response tone conflicts with user emotion",
   llm_review_fallback: "LLM review failed, used heuristic fallback",
 };
 
