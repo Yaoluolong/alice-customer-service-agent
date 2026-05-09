@@ -117,6 +117,14 @@ describe("heuristicClassifyWithConfidence", () => {
     expect(result.intent).toBe("product_inquiry");
     expect(result.confidence).toBe(0.8);
   });
+
+  it("prioritizes knowledge_query over order_status when match counts are equal (退款)", () => {
+    // "退款" matches knowledge_query (退款), "订单" matches order_status (订单)
+    // Both have 1 match, but knowledge_query should win by priority tiebreaker
+    const result = heuristicClassifyWithConfidence("退款订单", false);
+    expect(result.candidates[0]).toBe("knowledge_query");
+    expect(result.intent).toBe("knowledge_query");
+  });
 });
 
 // ---------- CONVERSATION_CLOSING priority ----------

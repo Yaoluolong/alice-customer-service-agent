@@ -1,7 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { getConfiguredModel } from "../config/models";
 import { buildComposerSystemPrompt } from "../config/persona";
-import { AgentState, TraceEntry, UserTone } from "../types";
+import { AgentState, GroundingFacts, TraceEntry, UserIntent, UserTone } from "../types";
 import { resolveReplyLanguage } from "../utils/language";
 import { getLastUserText } from "../utils/messages";
 import { detectUserTone } from "../utils/style";
@@ -226,10 +226,18 @@ export const responseComposerNode = async (state: AgentState): Promise<Partial<A
       output: `Generated closing reply (${reply.length} chars)`,
       metadata: { method: "closing_bypass", severity: "ok" },
     };
+    const closingGroundingFacts: GroundingFacts = {
+      intent: UserIntent.GENERAL_CHAT,
+      facts: [{ key: "conversation_closing", value: "User is ending the conversation", source: "chat" as const, confidence: 1.0 }],
+      unknowns: [],
+      fact_confidence: 1.0,
+      next_actions: [],
+    };
     return {
       draft_reply: reply,
       reply_language: language,
       tone_applied: "neutral",
+      grounding_facts: closingGroundingFacts,
       messages: [new AIMessage(reply)],
       trace: [closingTrace],
     };

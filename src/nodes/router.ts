@@ -69,9 +69,21 @@ export const heuristicClassifyWithConfidence = (
   }
 
   const matchedCategories = Object.keys(matchCounts);
-  // Top-3 sorted by match count descending
+  // Priority tiebreaker: when two intents have equal match counts,
+  // prefer knowledge_query over order_status (e.g. "退款" should route to knowledge)
+  const INTENT_PRIORITY: Record<string, number> = {
+    knowledge_query: 0,
+    order_status: 1,
+    product_inquiry: 2,
+    general_chat: 3,
+  };
+
+  // Top-3 sorted by match count descending, then by priority ascending
   const candidates = Object.entries(matchCounts)
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1]; // higher count first
+      return (INTENT_PRIORITY[a[0]] ?? 99) - (INTENT_PRIORITY[b[0]] ?? 99); // priority tiebreak
+    })
     .slice(0, 3)
     .map(([cat]) => cat);
 
