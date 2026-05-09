@@ -2,7 +2,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { getConfiguredModel } from "../config/models";
 import { AgentState, MediaContext, TraceEntry } from "../types";
-import logger from "../logger";
+import { logger } from "../logger";
 
 const getLastUserText = (state: AgentState): string => {
   for (let i = state.messages.length - 1; i >= 0; i -= 1) {

@@ -1,13 +1,16 @@
 import { BaseMessage } from "@langchain/core/messages";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { chatAgentNode } from "./nodes/chatAgent";
+import { clarificationPreCheckNode, preCheckCondition, clarificationGateNode, gateCondition } from "./nodes/clarificationGate";
 import { confidenceGateCondition, confidenceGateNode } from "./nodes/confidenceGate";
 import { humanHandoffNode } from "./nodes/humanHandoff";
 import { knowledgeAgentNode } from "./nodes/knowledgeAgent";
+import { mediaDescribeNode } from "./nodes/mediaDescribeNode";
 import { memoryBootstrapNode, memoryPersistNode } from "./nodes/memoryNode";
 import { orderAgentNode } from "./nodes/orderAgent";
 import { responseComposerNode } from "./nodes/responseComposer";
 import { responseReviewerNode } from "./nodes/responseReviewer";
+import { retrievalNode } from "./nodes/retrievalNode";
 import { routerCondition, routerNode } from "./nodes/router";
 import { salesAgentNode } from "./nodes/salesAgent";
 import { visualAgentNode } from "./nodes/visualAgent";
@@ -84,6 +87,10 @@ export const buildCustomerServiceGraph = () => {
     .addNode(RouteTarget.ORDER_AGENT, orderAgentNode)
     .addNode(RouteTarget.CHAT_AGENT, chatAgentNode)
     .addNode(RouteTarget.KNOWLEDGE_AGENT, knowledgeAgentNode)
+    .addNode("media_describe", mediaDescribeNode)
+    .addNode("retrieval", retrievalNode)
+    .addNode("clarification_precheck", clarificationPreCheckNode)
+    .addNode("clarification_gate", clarificationGateNode)
     .addNode("response_composer", responseComposerNode)
     .addNode("response_reviewer", responseReviewerNode)
     .addNode("confidence_gate", confidenceGateNode)
@@ -92,12 +99,30 @@ export const buildCustomerServiceGraph = () => {
     .addEdge(START, "memory_bootstrap")
     .addEdge("memory_bootstrap", "router")
     .addConditionalEdges("router", routerCondition, {
+      [RouteTarget.CONVERSATION_CLOSING]: "response_composer",
+      [RouteTarget.VISUAL_AGENT]: "media_describe",
+      [RouteTarget.ORDER_AGENT]: RouteTarget.ORDER_AGENT,
+      [RouteTarget.HUMAN_HANDOFF]: RouteTarget.HUMAN_HANDOFF,
+      [RouteTarget.SALES_AGENT]: "clarification_precheck",
+      [RouteTarget.KNOWLEDGE_AGENT]: "clarification_precheck",
+      [RouteTarget.CHAT_AGENT]: "clarification_precheck",
+    })
+    // media_describe → retrieval (fixed edge)
+    .addEdge("media_describe", "retrieval")
+    // clarification_precheck → retrieval or response_composer (conditional)
+    .addConditionalEdges("clarification_precheck", preCheckCondition, {
+      retrieval: "retrieval",
+      response_composer: "response_composer",
+    })
+    // retrieval → clarification_gate (fixed edge)
+    .addEdge("retrieval", "clarification_gate")
+    // clarification_gate → domain agent or response_composer (conditional)
+    .addConditionalEdges("clarification_gate", gateCondition, {
       [RouteTarget.VISUAL_AGENT]: RouteTarget.VISUAL_AGENT,
       [RouteTarget.SALES_AGENT]: RouteTarget.SALES_AGENT,
-      [RouteTarget.ORDER_AGENT]: RouteTarget.ORDER_AGENT,
-      [RouteTarget.CHAT_AGENT]: RouteTarget.CHAT_AGENT,
       [RouteTarget.KNOWLEDGE_AGENT]: RouteTarget.KNOWLEDGE_AGENT,
-      [RouteTarget.HUMAN_HANDOFF]: RouteTarget.HUMAN_HANDOFF
+      [RouteTarget.CHAT_AGENT]: RouteTarget.CHAT_AGENT,
+      response_composer: "response_composer",
     })
     .addEdge(RouteTarget.VISUAL_AGENT, RouteTarget.SALES_AGENT)
     .addEdge(RouteTarget.SALES_AGENT, "response_composer")

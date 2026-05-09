@@ -11,7 +11,7 @@ vi.mock("../../src/config/models", () => ({
 }));
 
 vi.mock("../../src/logger", () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 // Import after mocks

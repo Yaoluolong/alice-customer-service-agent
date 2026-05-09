@@ -349,10 +349,10 @@ export const responseComposerNode = async (state: AgentState): Promise<Partial<A
     metadata: { tone: userTone, language, method, replyLength: reply.length, severity: "ok" },
   };
 
-  if (cotThinking) {
+  if (cotThinking && composerTrace.metadata) {
     composerTrace.metadata.cot_thinking = cotThinking;
   }
-  if (cotFormatMiss) {
+  if (cotFormatMiss && composerTrace.metadata) {
     composerTrace.metadata.cot_format_miss = true;
   }
 

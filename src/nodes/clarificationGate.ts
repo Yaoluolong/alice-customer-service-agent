@@ -1,6 +1,6 @@
 import { AgentState, RouteTarget, TraceEntry } from "../types";
 import { getLastUserText } from "../utils/messages";
-import logger from "../logger";
+import { logger } from "../logger";
 
 // --- Entity Detection ---
 
