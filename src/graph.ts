@@ -11,7 +11,7 @@ import { responseReviewerNode } from "./nodes/responseReviewer";
 import { routerCondition, routerNode } from "./nodes/router";
 import { salesAgentNode } from "./nodes/salesAgent";
 import { visualAgentNode } from "./nodes/visualAgent";
-import { AgentState, RouteTarget, TenantAgentConfig, TraceEntry, UserIntent } from "./types";
+import { AgentState, GroundingFacts, RetrievedContext, RouteTarget, TenantAgentConfig, TraceEntry, UserIntent } from "./types";
 
 export const AgentStateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -36,7 +36,20 @@ export const AgentStateAnnotation = Annotation.Root({
   requires_human: Annotation<boolean>,
   human_feedback: Annotation<string | undefined>,
 
-  grounding_facts: Annotation<AgentState["grounding_facts"]>,
+  grounding_facts: Annotation<GroundingFacts | null>({
+    reducer: (existing, update) => {
+      if (!update) return existing;
+      if (!existing) return update;
+      return {
+        intent: update.intent,
+        facts: [...existing.facts, ...update.facts],
+        unknowns: [...existing.unknowns, ...update.unknowns],
+        fact_confidence: Math.max(existing.fact_confidence, update.fact_confidence),
+        next_actions: [...existing.next_actions, ...update.next_actions],
+      };
+    },
+    default: () => null,
+  }),
   draft_reply: Annotation<string | null>,
   tone_applied: Annotation<AgentState["tone_applied"]>,
   variation_id: Annotation<string | null>,
@@ -48,6 +61,13 @@ export const AgentStateAnnotation = Annotation.Root({
   conversation_summary: Annotation<string | null>,
   style_profile: Annotation<AgentState["style_profile"]>,
   recent_opening_templates: Annotation<string[]>,
+
+  retrieved_context: Annotation<RetrievedContext | null>({ reducer: (_, v) => v, default: () => null }),
+  media_description: Annotation<string | null>({ reducer: (_, v) => v, default: () => null }),
+  intent_confidence: Annotation<number>({ reducer: (_, v) => v, default: () => 1.0 }),
+  intent_candidates: Annotation<string[]>({ reducer: (_, v) => v, default: () => [] }),
+  requires_clarification: Annotation<boolean>({ reducer: (_, v) => v, default: () => false }),
+  conversation_closing: Annotation<boolean>({ reducer: (_, v) => v, default: () => false }),
 
   trace: Annotation<TraceEntry[]>({
     reducer: (left, right) => left.concat(right),
