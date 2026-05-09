@@ -3,7 +3,7 @@ import { appConfig } from "./env";
 
 type ModelRole = "primary" | "aux";
 
-const REASONING_MODEL_PREFIXES = ["o1", "o3", "o4"];
+const REASONING_MODEL_PREFIXES = ["o1", "o3", "o4", "moonshot", "kimi"];
 
 const isReasoningModel = (model: string): boolean =>
   REASONING_MODEL_PREFIXES.some((p) => model.startsWith(p));
