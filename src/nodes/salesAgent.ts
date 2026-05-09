@@ -1,7 +1,5 @@
 import { HumanMessage } from "@langchain/core/messages";
-import { RunnableConfig } from "@langchain/core/runnables";
 import { inventoryService } from "../mocks/inventory";
-import { resolveOvClient } from "../clients/resolve-ov-client";
 import { AgentState, GroundingFacts, PreferenceExtractor, ProductInfo, TraceEntry, UserPreference, UserIntent } from "../types";
 import { updateStyleProfileFromUserText } from "../utils/style";
 
@@ -109,46 +107,35 @@ const searchItemsToProducts = (items: Array<{ uri: string; abstract: string; sco
     similarityScore: item.score
   }));
 
-export const salesAgentNode = async (state: AgentState, config?: RunnableConfig): Promise<Partial<AgentState>> => {
-  const openVikingClient = resolveOvClient(config);
+export const salesAgentNode = async (state: AgentState): Promise<Partial<AgentState>> => {
   const userText = getLastUserText(state);
   const tenantConfig = state.tenant_config;
   const newPrefs = extractPreferencesFromText(userText, tenantConfig?.preferenceExtractors);
   const mergedPrefs = dedupePreferences([...state.user_preferences, ...newPrefs]);
   const nextStyle = updateStyleProfileFromUserText(state.style_profile, userText);
 
-  // If no products yet, search the tenant knowledge base
-  let retrievedProducts = state.retrieved_products;
-  if (retrievedProducts.length === 0 && state.tenant_id) {
-    try {
-      const result = await openVikingClient.search(
-        state.tenant_id,
-        state.customer_id,
-        userText,
-        state.openviking_session_id?.startsWith("local_") ? undefined : (state.openviking_session_id ?? undefined),
-        tenantConfig?.knowledgeSchema?.searchScopes?.product_inquiry ?? "viking://resources/products/",
-        5
-      );
-      const items = [...(result.resources ?? []), ...(result.memories ?? [])].sort(
-        (a, b) => b.score - a.score
-      );
-      retrievedProducts = searchItemsToProducts(items);
-    } catch {
-      // Non-fatal
-    }
-  }
+  // Read products from state.retrieved_context (populated by retrievalNode)
+  const retrievedItems = state.retrieved_context?.products ?? [];
+  const retrievedProducts = retrievedItems.length > 0
+    ? searchItemsToProducts(retrievedItems)
+    : state.retrieved_products;
+
+  const topScore = retrievedItems[0]?.score ?? null;
 
   const product = state.current_product_id
     ? retrievedProducts.find((item) => item.id === state.current_product_id) ?? null
     : retrievedProducts[0] ?? null;
 
   if (!product) {
+    // Dynamic confidence: no products
+    const dynamicConfidence = 0.2;
+
     const noProductFacts: GroundingFacts = {
       intent: UserIntent.PRODUCT_INQUIRY,
       facts: [],
       unknowns: ["缺少商品上下文"],
       next_actions: ["请补充图片或商品关键词", "如有目标款式可直接告诉我颜色和尺码"],
-      fact_confidence: 0.35
+      fact_confidence: dynamicConfidence
     };
 
     const noProductTrace: TraceEntry = {
@@ -156,7 +143,7 @@ export const salesAgentNode = async (state: AgentState, config?: RunnableConfig)
       displayName: "Sales Agent",
       input: mergedPrefs.map((p) => `${p.key}:${JSON.stringify(p.value)}`).join("; ") || "No preferences extracted",
       output: "No matching product",
-      metadata: { resultCount: retrievedProducts.length, factConfidence: 0.35, severity: "warn", suggestions: ["Knowledge base may lack relevant products"] },
+      metadata: { resultCount: retrievedProducts.length, factConfidence: dynamicConfidence, severity: "warn", suggestions: ["Knowledge base may lack relevant products"] },
     };
 
     return {
@@ -176,20 +163,21 @@ export const salesAgentNode = async (state: AgentState, config?: RunnableConfig)
     (item) => item.color === color && item.size === size && item.available > 0
   );
 
-  // Enrich product description with L2 detail from OpenViking if URI available
+  // Enrich product description with L2 detail from retrieved_context
   let productDetail = product.name;
-  if (product.imageUrl?.startsWith("viking://") && state.tenant_id) {
-    try {
-      const detail = await openVikingClient.readDetail(state.tenant_id, state.customer_id, product.imageUrl);
-      if (detail) productDetail = detail.slice(0, 2000);
-    } catch {
-      // Fallback to product name
-    }
+  const topDetailFromContext = state.retrieved_context?.topDetails?.[0];
+  if (topDetailFromContext) {
+    productDetail = topDetailFromContext.slice(0, 2000);
   }
+
+  // Dynamic confidence
+  const dynamicConfidence = retrievedProducts.length > 0
+    ? Math.min((topScore ?? 0) + 0.1, 0.95)
+    : 0.2;
 
   const facts: GroundingFacts = {
     intent: UserIntent.PRODUCT_INQUIRY,
-    fact_confidence: sku ? 0.92 : 0.76,
+    fact_confidence: sku ? Math.max(dynamicConfidence, 0.92) : dynamicConfidence,
     facts: [
       { key: "product_name", value: productDetail, source: "retrieval", confidence: 0.9, sourceUri: product.imageUrl },
       { key: "price", value: `¥${product.price}`, source: "retrieval", confidence: 0.9 },

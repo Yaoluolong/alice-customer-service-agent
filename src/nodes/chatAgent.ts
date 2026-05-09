@@ -17,9 +17,45 @@ export const chatAgentNode = async (state: AgentState): Promise<Partial<AgentSta
     ? state.user_preferences.map((item) => `${item.key}:${JSON.stringify(item.value)}`).join("; ")
     : "暂无";
 
+  // Read supplementary context from retrieved_context (if available)
+  const products = state.retrieved_context?.products ?? [];
+  const knowledge = state.retrieved_context?.knowledge ?? [];
+  const topScore = Math.max(
+    products[0]?.score ?? 0,
+    knowledge[0]?.score ?? 0
+  );
+
+  // Dynamic confidence: chat agent has lower cap and smaller boost
+  const dynamicConfidence = topScore > 0
+    ? Math.min(topScore + 0.05, 0.8)
+    : 0.5;
+
+  // Build additional grounding facts from retrieved context
+  const additionalFacts: Array<{ key: string; value: string; source: "retrieval"; confidence: number; sourceUri?: string }> = [];
+
+  if (products.length > 0) {
+    additionalFacts.push({
+      key: "related_product",
+      value: products[0].abstract?.slice(0, 200) ?? products[0].uri,
+      source: "retrieval",
+      confidence: products[0].score,
+      sourceUri: products[0].uri
+    });
+  }
+
+  if (knowledge.length > 0) {
+    additionalFacts.push({
+      key: "related_knowledge",
+      value: knowledge[0].abstract?.slice(0, 200) ?? knowledge[0].uri,
+      source: "retrieval",
+      confidence: knowledge[0].score,
+      sourceUri: knowledge[0].uri
+    });
+  }
+
   const facts: GroundingFacts = {
     intent: UserIntent.GENERAL_CHAT,
-    fact_confidence: 0.75,
+    fact_confidence: dynamicConfidence,
     facts: [
       {
         key: "chat_context",
@@ -32,7 +68,8 @@ export const chatAgentNode = async (state: AgentState): Promise<Partial<AgentSta
         value: prefText,
         source: "memory",
         confidence: state.user_preferences.length > 0 ? 0.78 : 0.4
-      }
+      },
+      ...additionalFacts
     ],
     unknowns: [],
     next_actions: ["可继续闲聊", "可引导到商品推荐、库存查询或订单查询"]

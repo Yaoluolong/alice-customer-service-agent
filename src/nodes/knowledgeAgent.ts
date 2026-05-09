@@ -1,7 +1,5 @@
 import { HumanMessage } from "@langchain/core/messages";
-import { RunnableConfig } from "@langchain/core/runnables";
-import { resolveOvClient } from "../clients/resolve-ov-client";
-import { AgentState, GroundingFacts, TraceEntry, UserIntent } from "../types";
+import { AgentState, EnrichedSearchItem, GroundingFacts, TraceEntry, UserIntent } from "../types";
 
 const getLastUserText = (state: AgentState): string => {
   for (let i = state.messages.length - 1; i >= 0; i -= 1) {
@@ -13,37 +11,21 @@ const getLastUserText = (state: AgentState): string => {
 };
 
 export const knowledgeAgentNode = async (
-  state: AgentState,
-  config?: RunnableConfig
+  state: AgentState
 ): Promise<Partial<AgentState>> => {
-  const openVikingClient = resolveOvClient(config);
-  const { tenant_id, customer_id, openviking_session_id, tenant_config } = state;
   const userText = getLastUserText(state);
 
-  const targetUri =
-    tenant_config?.knowledgeSchema?.searchScopes?.knowledge_query ??
-    "viking://resources/knowledge/";
-
-  let items: import("../clients/openviking-client").SearchItem[] = [];
-  try {
-    const result = await openVikingClient.search(
-      tenant_id,
-      customer_id,
-      userText,
-      openviking_session_id?.startsWith("local_") ? undefined : (openviking_session_id ?? undefined),
-      targetUri,
-      5
-    );
-    items = [...(result.resources ?? [])].sort((a, b) => b.score - a.score);
-  } catch {
-    // Non-fatal: return low-confidence fallback
-  }
+  // Read knowledge from state.retrieved_context (populated by retrievalNode)
+  const items: EnrichedSearchItem[] = state.retrieved_context?.knowledge ?? [];
 
   if (items.length === 0) {
+    // Dynamic confidence: no results
+    const dynamicConfidence = 0.2;
+
     const noResultFacts: GroundingFacts = {
       intent: UserIntent.KNOWLEDGE_QUERY,
       facts: [{ key: "no_knowledge", value: "未找到相关知识", source: "retrieval", confidence: 0.3 }],
-      fact_confidence: 0.35,
+      fact_confidence: dynamicConfidence,
       unknowns: ["no matching knowledge found in knowledge base"],
       next_actions: ["suggest rephrasing or contacting human support"]
     };
@@ -57,14 +39,13 @@ export const knowledgeAgentNode = async (
     return { grounding_facts: noResultFacts, trace: [noResultTrace] };
   }
 
-  // Enrich top-1 result with L2 detail if available
-  let topValue = items[0].abstract ?? items[0].uri;
-  try {
-    const detail = await openVikingClient.readDetail(tenant_id, customer_id, items[0].uri);
-    if (detail) topValue = detail.slice(0, 2000);
-  } catch {
-    // Fallback to abstract
-  }
+  const topScore = items[0].score;
+
+  // Enrich top-1 with L2 detail from retrieved_context
+  let topValue = state.retrieved_context?.topDetails?.[0] ?? items[0].abstract ?? items[0].uri;
+
+  // Dynamic confidence
+  const dynamicConfidence = Math.min(topScore + 0.1, 0.95);
 
   const facts: GroundingFacts = {
     intent: UserIntent.KNOWLEDGE_QUERY,
@@ -73,7 +54,7 @@ export const knowledgeAgentNode = async (
         key: "knowledge_0",
         value: topValue,
         source: "retrieval",
-        confidence: items[0].score,
+        confidence: topScore,
         sourceUri: items[0].uri
       },
       ...items.slice(1, 3).map((item, i) => ({
@@ -84,7 +65,7 @@ export const knowledgeAgentNode = async (
         sourceUri: item.uri
       }))
     ],
-    fact_confidence: Math.max(items[0].score, 0.6),
+    fact_confidence: dynamicConfidence,
     unknowns: [],
     next_actions: ["answer based on knowledge base content"]
   };
@@ -93,8 +74,8 @@ export const knowledgeAgentNode = async (
     node: "knowledge_agent",
     displayName: "Knowledge Agent",
     input: userText.slice(0, 80),
-    output: `Found ${items.length} articles (top score: ${items[0].score.toFixed(2)})`,
-    metadata: { resultCount: items.length, topScore: items[0].score, severity: "ok", suggestions: [] },
+    output: `Found ${items.length} articles (top score: ${topScore.toFixed(2)})`,
+    metadata: { resultCount: items.length, topScore, severity: "ok", suggestions: [] },
   };
 
   return {
