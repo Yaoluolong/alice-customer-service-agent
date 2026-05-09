@@ -314,7 +314,7 @@ export function createInitialState(params: {
 
     retrieved_context: null,
     media_description: null,
-    intent_confidence: 0,
+    intent_confidence: 1.0,
     intent_candidates: [],
     requires_clarification: false,
     conversation_closing: false,
