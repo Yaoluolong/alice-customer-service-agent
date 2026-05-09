@@ -17,17 +17,38 @@ npm run test:e2e     # vitest run (E2E 测试，不需要 Docker)
 
 ### Graph Flow
 
-固定链式流水线，定义在 `src/graph.ts`：
+定义在 `src/graph.ts`，包含多条路径：
 
+**标准流程**（sales/knowledge/chat intent）：
 ```
-memoryBootstrap → router → [visual|sales|order|chat|knowledge]Agent → responseComposer → responseReviewer → confidenceGate → (humanHandoff | memoryPersist)
+memoryBootstrap → router → clarificationPreCheck → retrievalNode → clarificationGate → domainAgent → responseComposer → responseReviewer → confidenceGate → (humanHandoff | memoryPersist)
 ```
 
-- `visual_agent → sales_agent` 串联（图搜后查库存）
-- `confidenceGate` 决定是继续回复（→ memoryPersist）还是转人工（→ humanHandoff → memoryPersist）
-- `router` 支持 Layered Routing：Layer 0 (hard rules: media→visual) → Layer 1 (LLM/heuristic intent classification) → Layer 2 (configurable intentMapping) → Layer 3 (configurable defaultAgent fallback)
-- `tenant_config.routingPolicy` 控制路由策略：`defaultAgent`（general_chat/unknown 的 fallback）、`intentMapping`（覆盖 intent→agent 映射）、`routerInstruction`（追加 LLM 分类指令）
-- `enabledAgents` 仍然生效：禁用的 agent fallback 到 `defaultAgent`，再到 `chat_agent`（`HUMAN_HANDOFF` 不受此限制）
+**Visual 流程**（图搜 intent）：
+```
+memoryBootstrap → router → mediaDescribeNode → retrievalNode → clarificationGate → visualAgent → salesAgent → responseComposer → ...
+```
+
+**对话结束流程**（conversation_closing intent）：
+```
+memoryBootstrap → router → responseComposer → responseReviewer → confidenceGate → memoryPersist
+```
+
+**订单/转人工**（跳过检索）：
+```
+memoryBootstrap → router → orderAgent/humanHandoff → responseComposer → ...
+```
+
+- `retrievalNode` 集中执行 OV 知识检索（双路 query 重写 + 智能精读），domain agent 只消费 `state.retrieved_context`
+- `clarificationPreCheck`（Phase A）在检索前快速拦截极模糊消息，`clarificationGate`（Phase B）在检索后结合结果质量判断是否需要澄清
+- `mediaDescribeNode` 调用 VLM 描述媒体，为 retrievalNode 提供搜索 query
+- `responseComposer` 支持 CoT 推理（`<thinking>/<reply>` 解析）、澄清消息透传、对话结束模板
+- `responseReviewer` 启发式评分增加 completeness/coherence/tone match 维度
+- `grounding_facts` 使用 merge reducer，visual→sales 链路的 facts 会合并而非覆盖
+- `router` 输出 `intent_confidence` + `intent_candidates`，支持 `CONVERSATION_CLOSING` intent
+- Layered Routing：Layer 0 (media→visual) → Layer 0.5 (closing detection) → Layer 1 (LLM/heuristic) → Layer 2 (intentMapping) → Layer 3 (defaultAgent)
+- `tenant_config.routingPolicy` 控制路由策略
+- `enabledAgents` 仍然生效
 
 ### Key Files
 
@@ -51,15 +72,18 @@ memoryBootstrap → router → [visual|sales|order|chat|knowledge]Agent → resp
 
 | Node | Role |
 |------|------|
-| `memoryNode.ts` | `memoryBootstrapNode`（加载记忆）+ `memoryPersistNode`（保存消息 + ContextPart + used()）。接受 `RunnableConfig` 用于 OV client DI |
-| `router.ts` | 意图分类 → 路由到目标 agent |
-| `visualAgent.ts` | VLM 描述 + `search()` 图搜商品。接受 `RunnableConfig` 用于 OV client DI |
-| `salesAgent.ts` | 偏好提取 + `search()` 商品搜索 + 库存查询。接受 `RunnableConfig` 用于 OV client DI |
-| `orderAgent.ts` | 订单状态查询 |
-| `chatAgent.ts` | 通用闲聊 |
-| `knowledgeAgent.ts` | FAQ / 政策类问答，搜索 `viking://resources/knowledge/`，top-1 拉 L2 detail |
-| `responseComposer.ts` | 基于 grounding facts 生成回复 |
-| `responseReviewer.ts` | 回复审查 + 打分。LLM 审查失败时 **降级到启发式评分**（不再强制转人工） |
+| `memoryNode.ts` | `memoryBootstrapNode`（加载记忆）+ `memoryPersistNode`（保存消息 + ContextPart + session_resolved 标记） |
+| `router.ts` | 意图分类 → 路由。输出 `intent_confidence`、`intent_candidates`，支持 `CONVERSATION_CLOSING` |
+| `mediaDescribeNode.ts` | VLM 媒体描述（从 visualAgent 提取），写入 `state.media_description` |
+| `retrievalNode.ts` | 集中 OV 知识检索：query 重写、双路搜索、智能精读、relevance 标注，写入 `state.retrieved_context` |
+| `clarificationGate.ts` | 两阶段澄清：`clarificationPreCheckNode`（检索前快速拦截）+ `clarificationGateNode`（检索后结合质量判断） |
+| `visualAgent.ts` | 消费 `retrieved_context.products` + `media_description`，生成视觉搜索 grounding facts |
+| `salesAgent.ts` | 消费 `retrieved_context.products`，偏好提取 + 库存查询 |
+| `orderAgent.ts` | 订单状态查询（mock 数据，不走检索） |
+| `chatAgent.ts` | 通用闲聊，消费 `retrieved_context`（products+knowledge）生成补充 facts |
+| `knowledgeAgent.ts` | 消费 `retrieved_context.knowledge`，生成 FAQ/政策 grounding facts |
+| `responseComposer.ts` | CoT 推理（`<thinking>/<reply>`）、澄清消息透传、对话结束模板、低置信度提示 |
+| `responseReviewer.ts` | 回复审查 + 打分（6 维度：factual/completeness/actionability/naturalness/coherence/tone） |
 | `confidenceGate.ts` | 置信度阈值判断（默认 0.7） |
 | `humanHandoff.ts` | 转人工处理 |
 
