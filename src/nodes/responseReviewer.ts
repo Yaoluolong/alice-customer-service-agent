@@ -5,7 +5,7 @@ import { getConfiguredModel } from "../config/models";
 import { BANNED_MECHANICAL_PHRASES, buildReviewerSystemPrompt } from "../config/persona";
 import { logger } from "../logger";
 import { AgentState, TraceEntry } from "../types";
-import { getLastAssistantText } from "../utils/messages";
+import { getLastAssistantText, getLastUserText } from "../utils/messages";
 
 const reviewSchema = z.object({
   score: z.coerce.number().min(0).max(1),
@@ -103,9 +103,7 @@ const heuristicReview = (state: AgentState, reply: string): ReviewPayload => {
   }
 
   // New dimensions
-  const lastUserMsg = state.messages?.length
-    ? (state.messages[state.messages.length - 1]?.content as string) ?? ""
-    : "";
+  const lastUserMsg = getLastUserText(state.messages ?? []);
 
   const completePenalty = heuristicCompleteness(lastUserMsg, reply);
   if (completePenalty < 0) { score += completePenalty; flags.push("incomplete_answer"); reasons.push("未完整回答所有问题"); }

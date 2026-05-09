@@ -129,12 +129,12 @@ export function clarificationPreCheckNode(
     return {
       requires_clarification: true,
       draft_reply: message,
-      trace: [...state.trace, trace],
+      trace: [trace],
     };
   }
 
   return {
-    trace: [...state.trace, trace],
+    trace: [trace],
   };
 }
 
@@ -179,12 +179,12 @@ export function clarificationGateNode(
     return {
       requires_clarification: true,
       draft_reply: message,
-      trace: [...state.trace, trace],
+      trace: [trace],
     };
   }
 
   return {
-    trace: [...state.trace, trace],
+    trace: [trace],
   };
 }
 

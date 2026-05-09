@@ -101,7 +101,6 @@ export async function retrievalNode(
     return {
       retrieved_context: null,
       trace: [
-        ...state.trace,
         {
           node: "retrievalNode",
           displayName: "Retrieval",
@@ -237,7 +236,6 @@ export async function retrievalNode(
     return {
       retrieved_context: { products, knowledge, topDetails, queryUsed },
       trace: [
-        ...state.trace,
         {
           node: "retrievalNode",
           displayName: "Retrieval",
@@ -253,7 +251,6 @@ export async function retrievalNode(
     return {
       retrieved_context: { products: [], knowledge: [], topDetails: [], queryUsed },
       trace: [
-        ...state.trace,
         {
           node: "retrievalNode",
           displayName: "Retrieval",
