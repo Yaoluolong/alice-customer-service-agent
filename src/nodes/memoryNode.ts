@@ -345,6 +345,12 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
       }
     }
 
+    // Mark session as resolved if conversation is closing
+    const sessionResolved = state.conversation_closing && state.openviking_session_id && !state.openviking_session_id.startsWith("local_");
+    if (sessionResolved) {
+      logger.info({ sessionId: state.openviking_session_id }, "memory_persist: session marked as resolved");
+    }
+
     const nextMessageCount = (state.openviking_message_count ?? 0) + persistedMessages;
     if (nextMessageCount >= MESSAGE_COMMIT_THRESHOLD) {
       openVikingClient
@@ -361,7 +367,7 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
           displayName: "Memory",
           input: `${persistedMessages} messages to save`,
           output: `Saved ${persistedMessages} messages, commit triggered at ${nextMessageCount}`,
-          metadata: { messageCount: persistedMessages, commitTriggered: true, severity: "ok" },
+          metadata: { messageCount: persistedMessages, commitTriggered: true, ...(sessionResolved && { session_resolved: true }), severity: "ok" },
         }]
       };
     }
@@ -379,6 +385,8 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
     };
   }
 
+  const sessionResolved = state.conversation_closing && state.openviking_session_id && !state.openviking_session_id.startsWith("local_");
+
   return {
     openviking_message_count: (state.openviking_message_count ?? 0) + persistedMessages,
     trace: [{
@@ -386,7 +394,7 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
       displayName: "Memory",
       input: `${persistedMessages} messages to save`,
       output: `Saved ${persistedMessages} messages`,
-      metadata: { messageCount: persistedMessages, severity: "ok" },
+      metadata: { messageCount: persistedMessages, ...(sessionResolved && { session_resolved: true }), severity: "ok" },
     }]
   };
 };

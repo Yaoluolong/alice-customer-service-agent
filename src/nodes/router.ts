@@ -4,6 +4,38 @@ import { buildRouterSystemPrompt } from "../config/persona";
 import { AgentState, RouteTarget, TenantAgentConfig, TraceEntry, UserIntent } from "../types";
 import { getLastUserText } from "../utils/messages";
 
+// --- Conversation Closing Detection (Layer 0.5) ---
+
+const CLOSING_PHRASES_ZH = [
+  "好的谢谢", "谢谢你", "没有了", "没别的了",
+  "就这样", "好的就这样", "不用了谢谢", "可以了谢谢",
+];
+
+const CLOSING_PHRASES_EN = [
+  "thanks that's all", "thank you bye", "no that's it",
+  "nothing else thanks", "goodbye", "bye bye",
+];
+
+const ALL_CLOSING_PHRASES = [...CLOSING_PHRASES_ZH, ...CLOSING_PHRASES_EN];
+
+/**
+ * Detect whether the user message is a conversation-closing phrase.
+ * Multi-word phrase match only — standalone "谢谢" or "thanks" do NOT trigger.
+ */
+export const isConversationClosing = (text: string): boolean => {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  return ALL_CLOSING_PHRASES.some((phrase) => normalized === phrase.toLowerCase());
+};
+
+// --- Confidence-aware Heuristic Classification ---
+
+export interface ClassificationResult {
+  intent: UserIntent;
+  confidence: number;
+  candidates: string[];
+}
+
 const DEFAULT_KEYWORDS: Record<string, string[]> = {
   knowledge_query: [
     "退货", "退换", "退款", "保修", "保修期", "售后",
@@ -16,26 +48,71 @@ const DEFAULT_KEYWORDS: Record<string, string[]> = {
   general_chat: ["你好", "谢谢", "再见", "聊聊", "hello", "thanks", "hi"],
 };
 
-const heuristicClassify = (
+export const heuristicClassifyWithConfidence = (
   text: string,
   hasMedia: boolean,
   keywordOverrides?: Record<string, string[]>
-): UserIntent => {
-  if (hasMedia) return UserIntent.VISUAL_SEARCH;
+): ClassificationResult => {
+  if (hasMedia) {
+    return { intent: UserIntent.VISUAL_SEARCH, confidence: 0.8, candidates: ["visual_search"] };
+  }
 
   const keywords = keywordOverrides
     ? { ...DEFAULT_KEYWORDS, ...keywordOverrides }
     : DEFAULT_KEYWORDS;
 
-  const matchesAny = (intentKeywords: string[]): boolean =>
-    intentKeywords.some((kw) => text.includes(kw));
+  // Count matches per category
+  const matchCounts: Record<string, number> = {};
+  for (const [category, kws] of Object.entries(keywords)) {
+    const count = kws.filter((kw) => text.includes(kw)).length;
+    if (count > 0) matchCounts[category] = count;
+  }
 
-  // knowledge_query checked before order_status to avoid "退款" matching order_status first
-  if (matchesAny(keywords.knowledge_query ?? [])) return UserIntent.KNOWLEDGE_QUERY;
-  if (matchesAny(keywords.order_status ?? [])) return UserIntent.ORDER_STATUS;
-  if (matchesAny(keywords.product_inquiry ?? [])) return UserIntent.PRODUCT_INQUIRY;
-  if (matchesAny(keywords.general_chat ?? [])) return UserIntent.GENERAL_CHAT;
-  return UserIntent.UNKNOWN;
+  const matchedCategories = Object.keys(matchCounts);
+  // Priority tiebreaker: when two intents have equal match counts,
+  // prefer knowledge_query over order_status (e.g. "退款" should route to knowledge)
+  const INTENT_PRIORITY: Record<string, number> = {
+    knowledge_query: 0,
+    order_status: 1,
+    product_inquiry: 2,
+    general_chat: 3,
+  };
+
+  // Top-3 sorted by match count descending, then by priority ascending
+  const candidates = Object.entries(matchCounts)
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1]; // higher count first
+      return (INTENT_PRIORITY[a[0]] ?? 99) - (INTENT_PRIORITY[b[0]] ?? 99); // priority tiebreak
+    })
+    .slice(0, 3)
+    .map(([cat]) => cat);
+
+  if (matchedCategories.length === 0) {
+    return { intent: UserIntent.UNKNOWN, confidence: 0.2, candidates: [] };
+  }
+
+  const topCategory = candidates[0];
+  const confidence = matchedCategories.length === 1 ? 0.8 : 0.4;
+
+  // Map category string to UserIntent
+  const categoryToIntent: Record<string, UserIntent> = {
+    knowledge_query: UserIntent.KNOWLEDGE_QUERY,
+    order_status: UserIntent.ORDER_STATUS,
+    product_inquiry: UserIntent.PRODUCT_INQUIRY,
+    general_chat: UserIntent.GENERAL_CHAT,
+  };
+
+  const intent = categoryToIntent[topCategory] ?? UserIntent.UNKNOWN;
+  return { intent, confidence, candidates };
+};
+
+/** Legacy wrapper — keeps classifyIntent compatible */
+const heuristicClassify = (
+  text: string,
+  hasMedia: boolean,
+  keywordOverrides?: Record<string, string[]>
+): UserIntent => {
+  return heuristicClassifyWithConfidence(text, hasMedia, keywordOverrides).intent;
 };
 
 const classifyIntent = async (
@@ -124,17 +201,58 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
   const hasMedia = Boolean(state.media_context ?? state.image_context);
   const mediaType = state.media_context?.mediaType;
   const tenantConfig = state.tenant_config;
+
+  // Layer 0: Hard rules — media always goes to visual (checked first in resolveTarget)
+  // Layer 0.5: Conversation closing detection (after media check, before classification)
+  if (!hasMedia && isConversationClosing(text)) {
+    const traceEntry: TraceEntry = {
+      node: "router",
+      displayName: "Intent Router",
+      input: text.slice(0, 80),
+      output: `Detected: conversation_closing → ${RouteTarget.CONVERSATION_CLOSING} (heuristic)`,
+      metadata: {
+        intent: "conversation_closing",
+        target: RouteTarget.CONVERSATION_CLOSING,
+        method: "heuristic",
+        severity: "ok",
+        suggestions: [],
+      },
+    };
+    return {
+      route_target: RouteTarget.CONVERSATION_CLOSING,
+      intent_confidence: 0.9,
+      intent_candidates: ["conversation_closing"],
+      conversation_closing: true,
+      trace: [traceEntry],
+    };
+  }
+
   const llm = getConfiguredModel("aux", 0);
   const method = llm ? "llm" : "heuristic";
-  const intent = await classifyIntent(
-    text,
-    hasMedia,
-    mediaType,
-    tenantConfig?.routerKeywords,
-    tenantConfig?.soulPrompt,
-    tenantConfig?.defaultLanguage ?? state.reply_language,
-    tenantConfig?.routingPolicy?.routerInstruction
-  );
+
+  // Classify with confidence
+  let intent: UserIntent;
+  let intentConfidence: number;
+  let intentCandidates: string[];
+
+  if (llm) {
+    intent = await classifyIntent(
+      text, hasMedia, mediaType,
+      tenantConfig?.routerKeywords,
+      tenantConfig?.soulPrompt,
+      tenantConfig?.defaultLanguage ?? state.reply_language,
+      tenantConfig?.routingPolicy?.routerInstruction
+    );
+    // LLM classification gets high confidence
+    intentConfidence = 0.85;
+    intentCandidates = [intent];
+  } else {
+    const result = heuristicClassifyWithConfidence(text, hasMedia, tenantConfig?.routerKeywords);
+    intent = result.intent;
+    intentConfidence = result.confidence;
+    intentCandidates = result.candidates;
+  }
+
   const target = resolveTarget(intent, hasMedia, tenantConfig);
 
   const isUnknown = intent === UserIntent.UNKNOWN;
@@ -147,6 +265,8 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
       intent,
       target,
       method,
+      intentConfidence,
+      intentCandidates,
       severity: isUnknown ? "warn" : "ok",
       suggestions: isUnknown ? ["Intent not recognized, using default route"] : [],
     },
@@ -155,6 +275,8 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
   return {
     user_intent: intent,
     route_target: target,
+    intent_confidence: intentConfidence,
+    intent_candidates: intentCandidates,
     requires_human: target === RouteTarget.HUMAN_HANDOFF,
     trace: [traceEntry]
   };

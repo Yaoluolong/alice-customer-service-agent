@@ -39,7 +39,7 @@ const VALID_CUSTOMER_ID = /^[a-zA-Z0-9_-]+$/;
 
 export class OpenVikingHttpClient {
   private readonly http: AxiosInstance;
-  private readonly breaker: ReturnType<typeof circuitBreaker>;
+  private breaker: ReturnType<typeof circuitBreaker>;
 
   constructor(baseUrl?: string, apiKey?: string | null) {
     const base = baseUrl ?? appConfig.openviking.baseUrl;
@@ -61,6 +61,18 @@ export class OpenVikingHttpClient {
     });
     this.breaker.onReset(() => {
       logger.info("openviking-client circuit breaker CLOSED — OpenViking recovered");
+    });
+  }
+
+  /**
+   * Reset the circuit breaker to closed state. Test-only helper — creating a fresh
+   * breaker avoids stale open/half-open state leaking between test cases.
+   * @internal
+   */
+  _resetBreakerForTest(): void {
+    this.breaker = circuitBreaker(handleAll, {
+      breaker: new ConsecutiveBreaker(5),
+      halfOpenAfter: 60_000,
     });
   }
 

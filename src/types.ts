@@ -71,7 +71,8 @@ export enum RouteTarget {
   ORDER_AGENT = "order_agent",
   CHAT_AGENT = "chat_agent",
   KNOWLEDGE_AGENT = "knowledge_agent",
-  HUMAN_HANDOFF = "human_handoff"
+  HUMAN_HANDOFF = "human_handoff",
+  CONVERSATION_CLOSING = "conversation_closing"
 }
 
 export interface ProductInfo {
@@ -119,6 +120,24 @@ export interface SearchItem {
   abstract: string;
   score: number;
   context_type?: string;
+}
+
+export interface EnrichedSearchItem {
+  uri: string;
+  abstract: string;
+  score: number;
+  context_type?: string;
+  is_leaf?: boolean;
+  match_reason?: string;
+  relevance: "high" | "medium" | "low";
+  detailLoaded: boolean;
+}
+
+export interface RetrievedContext {
+  products: EnrichedSearchItem[];
+  knowledge: EnrichedSearchItem[];
+  topDetails: string[];
+  queryUsed: string;
 }
 
 export interface MemoryContext {
@@ -198,6 +217,13 @@ export interface AgentState {
   conversation_summary: string | null;
   style_profile: StyleProfile;
   recent_opening_templates: string[];
+
+  retrieved_context: RetrievedContext | null;
+  media_description: string | null;
+  intent_confidence: number;
+  intent_candidates: string[];
+  requires_clarification: boolean;
+  conversation_closing: boolean;
 
   trace: TraceEntry[];
 }
@@ -285,6 +311,13 @@ export function createInitialState(params: {
       warmth: 0.7
     },
     recent_opening_templates: [],
+
+    retrieved_context: null,
+    media_description: null,
+    intent_confidence: 1.0,
+    intent_candidates: [],
+    requires_clarification: false,
+    conversation_closing: false,
 
     trace: []
   };
