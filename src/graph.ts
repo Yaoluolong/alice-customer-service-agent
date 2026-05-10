@@ -71,6 +71,9 @@ export const AgentStateAnnotation = Annotation.Root({
   intent_candidates: Annotation<string[]>({ reducer: (_, v) => v, default: () => [] }),
   requires_clarification: Annotation<boolean>({ reducer: (_, v) => v, default: () => false }),
   conversation_closing: Annotation<boolean>({ reducer: (_, v) => v, default: () => false }),
+  intent_stack: Annotation<string[]>({ reducer: (_, v) => v, default: () => [] }),
+  last_message_timestamp: Annotation<number>({ reducer: (_, v) => v, default: () => 0 }),
+  previous_summary: Annotation<string | null>({ reducer: (_, v) => v, default: () => null }),
 
   trace: Annotation<TraceEntry[]>({
     reducer: (left, right) => left.concat(right),

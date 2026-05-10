@@ -224,6 +224,9 @@ export interface AgentState {
   intent_candidates: string[];
   requires_clarification: boolean;
   conversation_closing: boolean;
+  intent_stack: string[];
+  last_message_timestamp: number;
+  previous_summary: string | null;
 
   trace: TraceEntry[];
 }
@@ -318,6 +321,9 @@ export function createInitialState(params: {
     intent_candidates: [],
     requires_clarification: false,
     conversation_closing: false,
+    intent_stack: [],
+    last_message_timestamp: 0,
+    previous_summary: null,
 
     trace: []
   };
