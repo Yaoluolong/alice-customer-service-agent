@@ -7,6 +7,29 @@ import { AgentState, MemoryContext, SearchItem, TraceEntry } from "../types";
 
 const MESSAGE_COMMIT_THRESHOLD = 20;
 
+const BASELINE_QUERIES: Record<string, Record<string, string>> = {
+  zh: {
+    sales_agent: "用户 购买历史 品牌偏好 尺码 颜色 风格 预算",
+    visual_agent: "用户 购买历史 品牌偏好 尺码 颜色 风格 预算",
+    knowledge_agent: "用户 历史问题 服务记录 退换货 投诉 售后",
+    order_agent: "用户 订单 物流 收货地址 购买记录",
+  },
+  en: {
+    sales_agent: "user purchase history brand preference size color style budget",
+    visual_agent: "user purchase history brand preference size color style budget",
+    knowledge_agent: "user service history returns complaints after-sales",
+    order_agent: "user orders logistics shipping address purchase records",
+  },
+};
+
+const DEFAULT_BASELINE = "user profile preferences history milestone purchases";
+
+export function getBaselineQuery(intentStackTop: string | null, language: string): string {
+  if (!intentStackTop) return DEFAULT_BASELINE;
+  const lang = language.startsWith("en") ? "en" : "zh";
+  return BASELINE_QUERIES[lang]?.[intentStackTop] ?? DEFAULT_BASELINE;
+}
+
 const getLastUserText = (state: AgentState): string => {
   for (let i = state.messages.length - 1; i >= 0; i -= 1) {
     if (state.messages[i] instanceof HumanMessage) {
@@ -109,7 +132,8 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
 
   // 2. Load long-term memories via dual-query: contextual + baseline profile
   const userQuery = getLastUserText(state);
-  const baselineQuery = "user profile preferences history milestone purchases";
+  const intentStackTop = state.intent_stack?.length ? state.intent_stack[state.intent_stack.length - 1] : null;
+  const baselineQuery = getBaselineQuery(intentStackTop, state.reply_language ?? "zh-CN");
 
   const CONTEXTUAL_LIMIT = 70;
   const BASELINE_LIMIT = 30;
