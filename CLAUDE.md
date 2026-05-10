@@ -49,6 +49,7 @@ memoryBootstrap → router → orderAgent/humanHandoff → responseComposer → 
 - Layered Routing：Layer 0 (media→visual) → Layer 0.5 (closing detection) → Layer 1 (LLM/heuristic) → Layer 2 (intentMapping) → Layer 3 (defaultAgent)
 - `tenant_config.routingPolicy` 控制路由策略
 - `enabledAgents` 仍然生效
+- **Intent stack**: Router 维护 `intent_stack`（最大深度 3），跟踪多轮对话意图。confidence < 0.3 且 stack 非空时继承上一轮 intent（设 `intent_confidence=1.0`）。Stack 在以下情况清空：conversation_closing、session commit、30 分钟空闲、新 session 创建
 
 ### Key Files
 
@@ -56,7 +57,7 @@ memoryBootstrap → router → orderAgent/humanHandoff → responseComposer → 
 |------|---------|
 | `src/types.ts` | `AgentState`、`GroundingFact`、`ChatInput`/`ChatResult` 等核心类型。`ChatInput` 包含可选 `correlationId` |
 | `src/graph.ts` | LangGraph `StateGraph` 定义、`AgentStateAnnotation`、`buildCustomerServiceGraph()` |
-| `src/service.ts` | `CustomerServiceAgentService` — 异步会话管理（`await store.get/set`）、调用 graph、返回 `ChatResult` |
+| `src/service.ts` | `CustomerServiceAgentService` — 异步会话管理（`await store.get/set`）、调用 graph、返回 `ChatResult`。30 分钟空闲 gap commit、intent_stack/previous_summary 持久化 |
 | `src/app.ts` | `createAliceServer()` — 原生 `http.Server`，路由 `/health`、`/metrics`、`/v1/chat`、`/v1/sessions/:id` |
 | `src/server.ts` | 入口：初始化 `RedisSessionStore` → `startRequestWorker()` → `createAliceServer().listen(PORT)` |
 | `src/config/env.ts` | `parseAgentConfig(process.env)` — 模块加载时解析配置（singleton），要求 `OPENAI_PRIMARY_MODEL` |
@@ -72,8 +73,8 @@ memoryBootstrap → router → orderAgent/humanHandoff → responseComposer → 
 
 | Node | Role |
 |------|------|
-| `memoryNode.ts` | `memoryBootstrapNode`（加载记忆）+ `memoryPersistNode`（保存消息 + ContextPart + session_resolved 标记） |
-| `router.ts` | 意图分类 → 路由。输出 `intent_confidence`、`intent_candidates`，支持 `CONVERSATION_CLOSING` |
+| `memoryNode.ts` | `memoryBootstrapNode`（加载记忆）+ `memoryPersistNode`（保存消息 + ContextPart + session_resolved 标记）。Sliding LLM summary、dynamic baseline search（基于 intent_stack 的查询选择）、preference detection（关键词+实体共现） |
+| `router.ts` | 意图分类 → 路由。输出 `intent_confidence`、`intent_candidates`，支持 `CONVERSATION_CLOSING`。intent_stack 管理，confidence-based 意图继承 |
 | `mediaDescribeNode.ts` | VLM 媒体描述（从 visualAgent 提取），写入 `state.media_description` |
 | `retrievalNode.ts` | 集中 OV 知识检索：query 重写、双路搜索、智能精读、relevance 标注，写入 `state.retrieved_context` |
 | `clarificationGate.ts` | 两阶段澄清：`clarificationPreCheckNode`（检索前快速拦截）+ `clarificationGateNode`（检索后结合质量判断） |
@@ -95,6 +96,14 @@ memoryBootstrap → router → orderAgent/humanHandoff → responseComposer → 
 - **`InMemorySessionStore`** — fallback（Redis 不可用时自动降级）。
 
 `server.ts` 启动时调用 `createSessionStore(process.env.REDIS_URL)` 初始化。
+
+### Memory Architecture (Phase 2)
+
+- **Short-term context window**: 最近 20 条消息（每条截断至 500 chars）+ 12 条消息摘要（每条截断至 200 chars）
+- **Sliding summary**: 每次 OV session commit（~20 条消息）时，由 LLM（aux model）生成对话摘要，存储为 `previous_summary`
+- **Cross-session continuity**: 新 session 创建时，`previous_summary` 作为上下文注入，实现跨 session 记忆延续
+- **30-minute idle commit**: `service.ts` 检测 30 分钟无活动后自动触发 OV session commit，保证记忆不丢失
+- **Preference detection**: `memoryPersistNode` 通过关键词+实体共现检测用户偏好，生成 `ContextPart` 附加到消息中
 
 ### Distributed Session Lock
 
