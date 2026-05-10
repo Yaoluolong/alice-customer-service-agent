@@ -448,7 +448,7 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
         openviking_message_count: 0,
         intent_stack: [],  // Clear stack on commit
         conversation_summary: summary ?? state.conversation_summary,
-        previous_summary: summary,
+        previous_summary: summary ?? state.previous_summary,
         trace: [{
           node: "memory",
           displayName: "Memory",
