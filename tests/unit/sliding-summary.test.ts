@@ -5,10 +5,12 @@ const mockInvoke = vi.fn().mockResolvedValue({
   content: "用户询问了红色Chanel手袋的价格和库存，偏好M码，已确认下单意向。"
 });
 
+const mockGetConfiguredModel = vi.fn().mockReturnValue({
+  invoke: mockInvoke,
+});
+
 vi.mock("../../src/config/models", () => ({
-  getConfiguredModel: () => ({
-    invoke: mockInvoke,
-  }),
+  getConfiguredModel: (...args: unknown[]) => mockGetConfiguredModel(...args),
 }));
 vi.mock("../../src/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -30,6 +32,8 @@ describe("generateSlidingSummary", () => {
 
   beforeEach(() => {
     mockInvoke.mockClear();
+    mockGetConfiguredModel.mockClear();
+    mockGetConfiguredModel.mockReturnValue({ invoke: mockInvoke });
   });
 
   it("generates summary via LLM", async () => {
@@ -42,5 +46,20 @@ describe("generateSlidingSummary", () => {
     const result = await generateSlidingSummary([], "zh-CN");
     expect(result).toBeNull();
     expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it("returns null when getConfiguredModel returns null (no LLM available)", async () => {
+    mockGetConfiguredModel.mockReturnValueOnce(null);
+
+    const result = await generateSlidingSummary(messages, "zh-CN");
+    expect(result).toBeNull();
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it("returns null when LLM invoke throws an error", async () => {
+    mockInvoke.mockRejectedValueOnce(new Error("LLM timeout"));
+
+    const result = await generateSlidingSummary(messages, "zh-CN");
+    expect(result).toBeNull();
   });
 });

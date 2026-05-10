@@ -60,4 +60,8 @@ describe("detectPreference", () => {
   it("returns null for English without keyword", () => {
     expect(detectPreference("thanks for your help")).toBeNull();
   });
+
+  it("returns null for 'looks like a red bag' (like = similar, not preference)", () => {
+    expect(detectPreference("It looks like a red bag")).toBeNull();
+  });
 });

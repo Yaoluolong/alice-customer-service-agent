@@ -6,7 +6,7 @@ export interface PreferenceDetection {
 
 // Longer/more-specific keywords first to avoid partial matches ("不喜欢" before "喜欢")
 const PREFERENCE_KEYWORDS_ZH = ["不喜欢", "喜欢", "偏好", "想要", "不要", "讨厌"];
-const PREFERENCE_KEYWORDS_EN = ["don't want", "prefer", "love", "hate", "like"];
+const PREFERENCE_KEYWORDS_EN = ["don't want", "prefer", "love", "hate"];
 
 const COLOR_PATTERNS =
   /红色|黑色|白色|蓝色|绿色|粉色|棕色|灰色|米色|金色|银色|red|black|white|blue|green|pink|brown|grey|gray|beige|gold|silver/i;
