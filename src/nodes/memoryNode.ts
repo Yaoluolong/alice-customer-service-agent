@@ -1,9 +1,13 @@
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { AIMessage, BaseMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { MessagePart } from "../clients/openviking-client";
 import { resolveOvClient } from "../clients/resolve-ov-client";
+import { getConfiguredModel } from "../config/models";
+import { getSummaryInstruction } from "../config/persona";
 import { logger } from "../logger";
 import { AgentState, MemoryContext, SearchItem, TraceEntry } from "../types";
+import { detectPreference } from "../utils/preference-detector";
+import { getLastUserText as getLastUserTextFromMessages } from "../utils/messages";
 
 const MESSAGE_COMMIT_THRESHOLD = 20;
 
@@ -84,6 +88,36 @@ export const categoriseMemories = (
 
   return { profile, preferences, entities, events, cases, patterns };
 };
+
+export async function generateSlidingSummary(
+  messages: BaseMessage[],
+  language: string
+): Promise<string | null> {
+  if (!messages || messages.length === 0) return null;
+
+  const llm = getConfiguredModel("aux", 0);
+  if (!llm) return null;
+
+  try {
+    const conversationText = messages
+      .map((m) => {
+        const role = m instanceof HumanMessage ? "User" : "Assistant";
+        return `${role}: ${String(m.content).slice(0, 300)}`;
+      })
+      .join("\n");
+
+    const response = await llm.invoke([
+      new SystemMessage(getSummaryInstruction(language)),
+      new HumanMessage(conversationText),
+    ]);
+
+    const summary = typeof response.content === "string" ? response.content.trim() : null;
+    return summary && summary.length > 0 ? summary : null;
+  } catch (err) {
+    logger.warn({ err }, "sliding summary generation failed");
+    return null;
+  }
+}
 
 export const memoryBootstrapNode = async (state: AgentState, config?: RunnableConfig): Promise<Partial<AgentState>> => {
   const openVikingClient = resolveOvClient(config);
@@ -357,6 +391,19 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
         }
       }
 
+      // Preference detection: attach ContextPart if keyword+entity co-occurrence found
+      const lastUserText = getLastUserTextFromMessages(state.messages ?? []);
+      const preference = detectPreference(lastUserText);
+      if (preference) {
+        assistantParts.push({
+          type: "context",
+          uri: "viking://user/memories/preferences/realtime",
+          context_type: "preference",
+          abstract: `User preference: ${preference.keyword} ${preference.entity}`,
+        });
+        logger.info({ preference: { keyword: preference.keyword, entity: preference.entity } }, "preference detected, attaching ContextPart");
+      }
+
       await openVikingClient.addMessage(
         tenant_id,
         customer_id,
@@ -384,21 +431,30 @@ export const memoryPersistNode = async (state: AgentState, config?: RunnableConf
 
     const nextMessageCount = (state.openviking_message_count ?? 0) + persistedMessages;
     if (nextMessageCount >= MESSAGE_COMMIT_THRESHOLD) {
-      openVikingClient
-        .commitSession(tenant_id, customer_id, openviking_session_id, false)
-        .catch((err) => {
-          logger.warn({ tenant_id, openviking_session_id, err: err.message }, "memory-persist commitSession failed");
-        });
+      // Generate sliding summary before commit
+      const summary = await generateSlidingSummary(state.messages, state.reply_language ?? "zh-CN");
+
+      // Await commit (synchronous in summary path)
+      try {
+        await openVikingClient.commitSession(tenant_id, customer_id, openviking_session_id, false);
+      } catch (err) {
+        logger.warn({ err }, "commit after summary failed, proceeding");
+      }
+
+      logger.info({ sessionId: openviking_session_id, hasSummary: !!summary }, "session committed with summary");
 
       return {
         openviking_session_id: null,
         openviking_message_count: 0,
+        intent_stack: [],  // Clear stack on commit
+        conversation_summary: summary ?? state.conversation_summary,
+        previous_summary: summary,
         trace: [{
           node: "memory",
           displayName: "Memory",
           input: `${persistedMessages} messages to save`,
-          output: `Saved ${persistedMessages} messages, commit triggered at ${nextMessageCount}`,
-          metadata: { messageCount: persistedMessages, commitTriggered: true, ...(sessionResolved && { session_resolved: true }), severity: "ok" },
+          output: `Saved ${persistedMessages} messages, commit triggered at ${nextMessageCount}${summary ? ", summary generated" : ""}`,
+          metadata: { messageCount: persistedMessages, commitTriggered: true, hasSummary: !!summary, ...(sessionResolved && { session_resolved: true }), severity: "ok" },
         }]
       };
     }
