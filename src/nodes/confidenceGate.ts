@@ -4,7 +4,7 @@ import { AgentState, RouteTarget, TraceEntry } from "../types";
 export type ConfidenceGateDecision = "handoff" | "continue";
 
 export const confidenceGateNode = async (state: AgentState): Promise<Partial<AgentState>> => {
-  const threshold = appConfig.confidence.threshold;
+  const threshold = state.tenant_config?.confidenceThreshold ?? appConfig.confidence.threshold;
   const score = state.agent_confidence;
   const margin = score - threshold;
   const shouldHandoff = state.requires_human || score < threshold;

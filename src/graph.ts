@@ -1,5 +1,6 @@
 import { BaseMessage } from "@langchain/core/messages";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+import { appConfig } from "./config/env";
 import { chatAgentNode } from "./nodes/chatAgent";
 import { clarificationPreCheckNode, preCheckCondition, clarificationGateNode, gateCondition } from "./nodes/clarificationGate";
 import { confidenceGateCondition, confidenceGateNode } from "./nodes/confidenceGate";
@@ -11,6 +12,7 @@ import { orderAgentNode } from "./nodes/orderAgent";
 import { responseComposerNode } from "./nodes/responseComposer";
 import { responseReviewerNode } from "./nodes/responseReviewer";
 import { retrievalNode } from "./nodes/retrievalNode";
+import { rewriteNode } from "./nodes/rewriteNode";
 import { routerCondition, routerNode } from "./nodes/router";
 import { salesAgentNode } from "./nodes/salesAgent";
 import { visualAgentNode } from "./nodes/visualAgent";
@@ -58,6 +60,9 @@ export const AgentStateAnnotation = Annotation.Root({
   variation_id: Annotation<string | null>,
   agent_confidence: Annotation<number>,
   review_flags: Annotation<string[]>,
+  reviewer_retries: Annotation<number>,
+  failed_checks: Annotation<string[]>,
+  retry_feedback: Annotation<string[]>,
   confidence_reasons: Annotation<string[]>,
   handoff_reason: Annotation<string | null>,
   reply_language: Annotation<string>,
@@ -81,6 +86,26 @@ export const AgentStateAnnotation = Annotation.Root({
   })
 });
 
+export type ReviewerDecision = "pass" | "retry" | "exhausted";
+
+export const reviewerCondition = (state: AgentState): ReviewerDecision => {
+  const threshold = state.tenant_config?.confidenceThreshold ?? appConfig.confidence.threshold;
+  const hasHardReject = state.failed_checks.some((id) =>
+    id.startsWith("custom:") &&
+    state.tenant_config?.reviewerPolicy?.customRules?.some(
+      (r) => r.id === id.slice("custom:".length) && r.action === "hard_reject"
+    )
+  );
+  const hasFailure = hasHardReject || state.agent_confidence < threshold;
+
+  if (!hasFailure) return "pass";
+
+  const maxRetries = state.tenant_config?.reviewerPolicy?.maxRetries ?? 0;
+  if (state.reviewer_retries < maxRetries) return "retry";
+
+  return "exhausted";
+};
+
 export const buildCustomerServiceGraph = () => {
   const graph = new StateGraph(AgentStateAnnotation)
     .addNode("memory_bootstrap", memoryBootstrapNode)
@@ -96,6 +121,7 @@ export const buildCustomerServiceGraph = () => {
     .addNode("clarification_gate", clarificationGateNode)
     .addNode("response_composer", responseComposerNode)
     .addNode("response_reviewer", responseReviewerNode)
+    .addNode("rewrite", rewriteNode)
     .addNode("confidence_gate", confidenceGateNode)
     .addNode(RouteTarget.HUMAN_HANDOFF, humanHandoffNode)
     .addNode("memory_persist", memoryPersistNode)
@@ -133,7 +159,12 @@ export const buildCustomerServiceGraph = () => {
     .addEdge(RouteTarget.CHAT_AGENT, "response_composer")
     .addEdge(RouteTarget.KNOWLEDGE_AGENT, "response_composer")
     .addEdge("response_composer", "response_reviewer")
-    .addEdge("response_reviewer", "confidence_gate")
+    .addConditionalEdges("response_reviewer", reviewerCondition, {
+      pass: "confidence_gate",
+      retry: "rewrite",
+      exhausted: "confidence_gate",
+    })
+    .addEdge("rewrite", "response_reviewer")
     .addConditionalEdges("confidence_gate", confidenceGateCondition, {
       continue: "memory_persist",
       handoff: RouteTarget.HUMAN_HANDOFF

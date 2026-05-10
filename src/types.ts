@@ -30,6 +30,33 @@ export interface RoutingPolicy {
   routerInstruction?: string;
 }
 
+export type ReviewDimension =
+  | "grounding_facts"
+  | "unknowns"
+  | "length"
+  | "mechanical_phrase"
+  | "repetitive_opening"
+  | "completeness"
+  | "coherence"
+  | "tone_match";
+
+export interface ReviewRule {
+  id: string;
+  name: string;
+  type: "keyword" | "regex" | "semantic";
+  mode?: "must_not_contain" | "must_contain";
+  pattern: string[] | string;
+  action: "penalty" | "hard_reject";
+  penaltyScore?: number;
+  enabled?: boolean;
+}
+
+export interface ReviewerPolicy {
+  enabledDimensions?: ReviewDimension[];
+  customRules?: ReviewRule[];
+  maxRetries?: number;
+}
+
 export interface TenantAgentConfig {
   /** Custom soul prompt — overrides SOUL.md when provided */
   soulPrompt?: string;
@@ -49,6 +76,8 @@ export interface TenantAgentConfig {
   languagePolicy?: "auto" | "fixed";
   /** Confidence threshold override */
   confidenceThreshold?: number;
+  /** Reviewer policy — controls review dimensions, custom rules, and retry behavior */
+  reviewerPolicy?: ReviewerPolicy;
   /** Reserved for future tenant-specific external APIs */
   externalApis?: Record<string, { url: string; headers?: Record<string, string> }>;
 }
@@ -211,6 +240,9 @@ export interface AgentState {
   variation_id: string | null;
   agent_confidence: number;
   review_flags: string[];
+  reviewer_retries: number;
+  failed_checks: string[];
+  retry_feedback: string[];
   confidence_reasons: string[];
   handoff_reason: string | null;
   reply_language: string;
@@ -303,6 +335,9 @@ export function createInitialState(params: {
     variation_id: null,
     agent_confidence: 1,
     review_flags: [],
+    reviewer_retries: 0,
+    failed_checks: [],
+    retry_feedback: [],
     confidence_reasons: [],
     handoff_reason: null,
     reply_language: params.replyLanguage ?? "zh-CN",
