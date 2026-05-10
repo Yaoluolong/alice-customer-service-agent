@@ -41,8 +41,8 @@ const getLastUserText = (state: AgentState): string => {
 
 const buildConversationSummary = (messages: Array<{ role: string; content: string }>): string =>
   messages
-    .slice(-6)
-    .map((m) => `${m.role}: ${m.content.slice(0, 120)}`)
+    .slice(-12)
+    .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
     .join("\n");
 
 export const categoriseMemories = (
@@ -230,13 +230,20 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
   // 3. Build short-term from existing messages in state
   const recentMessages = state.messages
     .filter((m) => m instanceof HumanMessage || m instanceof AIMessage)
-    .slice(-10)
+    .slice(-20)
     .map((m) => ({
       role: m instanceof HumanMessage ? "user" : "assistant",
-      content: String(m.content).slice(0, 200)
+      content: String(m.content).slice(0, 500)
     }));
 
-  const sessionSummaries = recentMessages.length > 0 ? [buildConversationSummary(recentMessages)] : [];
+  // Prepend previous session summary if available
+  const previousSummary = state.previous_summary;
+  const currentSummary = buildConversationSummary(recentMessages);
+  const fullSummary = previousSummary
+    ? `[Previous session]\n${previousSummary}\n\n[Current session]\n${currentSummary}`
+    : currentSummary;
+
+  const sessionSummaries = recentMessages.length > 0 ? [fullSummary] : [];
 
   const memoryContext: MemoryContext = {
     shortTerm: { recentMessages, sessionSummaries },
@@ -273,7 +280,7 @@ export const memoryBootstrapNode = async (state: AgentState, config?: RunnableCo
     openviking_session_id: ovSessionId,
     openviking_message_count: ovMessageCount,
     memory_context: memoryContext,
-    conversation_summary: sessionSummaries[0] ?? state.conversation_summary,
+    conversation_summary: fullSummary || state.conversation_summary,
     style_profile: existingStyle,
     trace: [bootstrapTrace]
   };
