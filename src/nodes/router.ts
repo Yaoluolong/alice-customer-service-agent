@@ -28,6 +28,37 @@ export const isConversationClosing = (text: string): boolean => {
   return ALL_CLOSING_PHRASES.some((phrase) => normalized === phrase.toLowerCase());
 };
 
+// --- Intent Stack ---
+
+const INTENT_STACK_MAX_DEPTH = 3;
+const INTENT_INHERIT_THRESHOLD = 0.3;
+
+export interface IntentStackResult {
+  stack: string[];
+  inherited: boolean;
+  inheritedTarget?: string;
+}
+
+export function updateIntentStack(
+  currentStack: string[],
+  newTarget: string,
+  confidence: number
+): IntentStackResult {
+  if (confidence >= INTENT_INHERIT_THRESHOLD || currentStack.length === 0) {
+    const stack = [...currentStack];
+    if (stack[stack.length - 1] !== newTarget) {
+      stack.push(newTarget);
+      if (stack.length > INTENT_STACK_MAX_DEPTH) stack.shift();
+    }
+    return { stack, inherited: false };
+  }
+  return {
+    stack: [...currentStack],
+    inherited: true,
+    inheritedTarget: currentStack[currentStack.length - 1],
+  };
+}
+
 // --- Confidence-aware Heuristic Classification ---
 
 export interface ClassificationResult {
@@ -222,6 +253,7 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
       route_target: RouteTarget.CONVERSATION_CLOSING,
       intent_confidence: 0.9,
       intent_candidates: ["conversation_closing"],
+      intent_stack: [],
       conversation_closing: true,
       trace: [traceEntry],
     };
@@ -253,7 +285,7 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
     intentCandidates = result.candidates;
   }
 
-  const target = resolveTarget(intent, hasMedia, tenantConfig);
+  let target = resolveTarget(intent, hasMedia, tenantConfig);
 
   const isUnknown = intent === UserIntent.UNKNOWN;
   const traceEntry: TraceEntry = {
@@ -272,11 +304,28 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
     },
   };
 
+  // Intent stack logic
+  const stackResult = updateIntentStack(
+    state.intent_stack ?? [],
+    target,
+    intentConfidence
+  );
+
+  if (stackResult.inherited) {
+    target = stackResult.inheritedTarget!;
+    intentConfidence = 1.0;
+    traceEntry.metadata.inherited = true;
+    traceEntry.metadata.inheritedFrom = stackResult.inheritedTarget;
+  }
+
+  const finalStack = stackResult.stack;
+
   return {
     user_intent: intent,
     route_target: target,
     intent_confidence: intentConfidence,
     intent_candidates: intentCandidates,
+    intent_stack: finalStack,
     requires_human: target === RouteTarget.HUMAN_HANDOFF,
     trace: [traceEntry]
   };
