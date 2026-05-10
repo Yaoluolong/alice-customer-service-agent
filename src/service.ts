@@ -1,10 +1,23 @@
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { v4 as uuidv4 } from "uuid";
+import { openVikingClient } from "./clients/openviking-client";
 import { appConfig } from "./config/env";
 import { buildCustomerServiceGraph } from "./graph";
+import { logger } from "./logger";
 import { getSessionStore } from "./sessionStore";
 import { ChatInput, ChatResult, MemoryContext, RouteTarget, UserIntent, createInitialState } from "./types";
 import { getRecentConversationWindow } from "./utils/messages";
+
+export const GAP_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+
+export function shouldCommitOnGap(
+  lastTimestamp: number,
+  sessionId: string | null
+): boolean {
+  if (!lastTimestamp || lastTimestamp === 0) return false;
+  if (!sessionId || sessionId.startsWith("local_")) return false;
+  return Date.now() - lastTimestamp > GAP_THRESHOLD_MS;
+}
 
 const app = buildCustomerServiceGraph();
 
@@ -29,6 +42,19 @@ export class CustomerServiceAgentService {
     const existing = await store.get(sessionId);
     const userMessage = new HumanMessage(input.text);
 
+    // Time-gap commit: if 30+ minutes since last message, commit old session
+    if (existing && shouldCommitOnGap(existing.last_message_timestamp, existing.openviking_session_id)) {
+      try {
+        await openVikingClient.commitSession(input.tenantId, input.customerId, existing.openviking_session_id!, true);
+        logger.info({ sessionId: existing.openviking_session_id, gap: Date.now() - existing.last_message_timestamp }, "time-gap commit");
+      } catch (err) {
+        logger.warn({ err }, "time-gap commit failed, proceeding with new session");
+      }
+      existing.openviking_session_id = null;
+      existing.openviking_message_count = 0;
+      existing.intent_stack = [];
+    }
+
     const invocationState = existing
       ? {
           ...existing,
@@ -52,7 +78,9 @@ export class CustomerServiceAgentService {
           review_flags: [],
           confidence_reasons: [],
           handoff_reason: null,
-          trace: []
+          trace: [],
+          intent_stack: existing.intent_stack ?? [],
+          previous_summary: existing.previous_summary ?? null,
         }
       : createInitialState({
           sessionId,
@@ -65,6 +93,9 @@ export class CustomerServiceAgentService {
           replyLanguage: appConfig.language.defaultReplyLanguage,
           tenantConfig: input.tenantConfig
         });
+
+    // Update timestamp for current message
+    invocationState.last_message_timestamp = Date.now();
 
     const finalState = await app.invoke(invocationState);
     await store.set(sessionId, finalState);

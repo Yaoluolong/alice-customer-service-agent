@@ -101,6 +101,17 @@ export const buildComposerSystemPrompt = async (params: {
   return buildPrompt(instruction, params.soulPrompt, params.language);
 };
 
+const SUMMARY_INSTRUCTION_ZH = `将以下对话历史压缩为100字以内的摘要。
+保留：用户身份、偏好、已讨论的产品/问题、未解决的需求。
+不要包含问候语或客套话。只输出摘要文本，不要添加标题或格式。`;
+
+const SUMMARY_INSTRUCTION_EN = `Compress the following conversation into a summary of 100 words or less.
+Keep: user identity, preferences, discussed products/issues, unresolved needs.
+Exclude greetings and pleasantries. Output only the summary text, no titles or formatting.`;
+
+export const getSummaryInstruction = (language: string): string =>
+  language.startsWith("en") ? SUMMARY_INSTRUCTION_EN : SUMMARY_INSTRUCTION_ZH;
+
 export const buildReviewerSystemPrompt = async (language: string, soulPrompt?: string): Promise<string> => {
   const isEnglish = language === "en-US";
   const bannedList = BANNED_MECHANICAL_PHRASES.join("/");

@@ -312,10 +312,12 @@ export const routerNode = async (state: AgentState): Promise<Partial<AgentState>
   );
 
   if (stackResult.inherited) {
-    target = stackResult.inheritedTarget!;
+    target = stackResult.inheritedTarget as RouteTarget;
     intentConfidence = 1.0;
-    traceEntry.metadata.inherited = true;
-    traceEntry.metadata.inheritedFrom = stackResult.inheritedTarget;
+    if (traceEntry.metadata) {
+      traceEntry.metadata.inherited = true;
+      traceEntry.metadata.inheritedFrom = stackResult.inheritedTarget;
+    }
   }
 
   const finalStack = stackResult.stack;
